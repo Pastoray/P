@@ -34,7 +34,7 @@ function(add_e2e_test name source_file expected_output)
    --as ${AS_EXECUTABLE}
    --ld ${LD_EXECUTABLE}
    --src ${CMAKE_CURRENT_SOURCE_DIR}/e2e/${source_file}
-   --expected "${expected_output}"
+   "--expected=${expected_output}"
   )
 endfunction()
 
