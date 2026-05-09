@@ -6,6 +6,7 @@
 #include <optional>
 #include <variant>
 #include <vector>
+#include <set>
 
 #include "tokenizer.hpp"
 #include "shared_ops.hpp"
@@ -26,6 +27,7 @@ namespace Node
   };
   struct UnExpr;
   struct BinExpr;
+  struct MemberExpr;
   struct Lit;
   struct Ident;
   struct Int;
@@ -35,6 +37,7 @@ namespace Node
     virtual ~ExprVisitor() = default;
     virtual void visit(const UnExpr& un_expr) = 0;
     virtual void visit(const BinExpr& bin_expr) = 0;
+    virtual void visit(const MemberExpr& mem_expr) = 0;
     virtual void visit(const Ident& ident) = 0;
     virtual void visit(const Int& int_) = 0;
     virtual void visit(const Call& call) = 0;
@@ -145,6 +148,25 @@ namespace Node
     bool pref;
   };
 
+  struct MemberExpr : Expr
+  {
+    std::shared_ptr<Expr> expr;
+    std::string member;
+    void accept(ExprVisitor& v) override { v.visit(*this); }
+    void dump(int ident) const override
+    {
+      std::cout << std::string(ident, '\t') << "Node::UnExpr {\n";
+      if (expr)
+      {
+        std::cout << std::string(ident + 1, '\t') << "expr: " << '\n';
+        expr->dump(ident + 1);
+      }
+      // std::cout << std::string(ident + 1, '\t') << "op: " << op << '\n';
+      // std::cout << std::string(ident + 1, '\t') << "kind: " << (pref ? "prefix" : "suffix") << '\n';
+      std::cout << std::string(ident, '\t') << "}\n";
+    }
+  };
+
   struct BinExpr : Expr
   {
     explicit BinExpr(std::shared_ptr<Expr> lhs, BinOp op,
@@ -173,6 +195,13 @@ namespace Node
     std::shared_ptr<Expr> lhs;
     BinOp op;
     std::shared_ptr<Expr> rhs;
+  };
+
+  struct Member : Node::Expr
+  {
+    explicit Member(Type t, const int val) : type(std::move(t)), off(val) {}
+    Type type;
+    int off;
   };
 
   struct Call : Expr
@@ -269,13 +298,13 @@ namespace Node
 
   struct Struct : Decl
   {
-    explicit Struct(Ident&& id) : id(std::move(id)) {}
+    explicit Struct(Ident id) : id(std::move(id)) {}
     void accept(DeclVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override {
       std::cout << std::string(ident, '\t') << "Node::Struct: " << id.name << " {\n";
-      for (const auto& [type, member_id] : members) {
-          // Assuming Type has a way to be printed, or just print the name for now
-          std::cout << std::string(ident + 1, '\t') << member_id.name << "\n";
+      for (const auto& [type, member_id] : members)
+      {
+        std::cout << std::string(ident + 1, '\t') << member_id.name << "\n";
       }
       std::cout << std::string(ident, '\t') << "}\n";
     }
@@ -508,6 +537,7 @@ private:
 
 private:
   const std::vector<Token> m_tokens;
+  std::set<std::string> m_types; // light types table
   uint16_t m_index;
 };
 

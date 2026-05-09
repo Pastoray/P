@@ -105,7 +105,7 @@ namespace Reg
       case (2): return to16(reg);
       case (4): return to32(reg);
       case (8): return to64(reg);
-      default: assert(false && "Invalid reg size");
+      default: return to64(reg); assert(false && "Invalid reg size");
     }
   }
 
@@ -205,7 +205,7 @@ struct RegPool
         case (2): return to16(reg);
         case (4): return to32(reg);
         case (8): return to64(reg);
-        default: assert(false && "Unrecognized alloc size");
+        default:  return to64(reg); assert(false && "Unrecognized alloc size");
       }
     }
     assert(false && "Couldn't allocate register");
@@ -476,6 +476,7 @@ private:
   void gen_params(std::vector<IR::Param>& params);
   void gen_ret(IR::Ret& ret);
   void gen_alloca(IR::Alloca& alc);
+  void gen_allocc(IR::Allocc& alc);
   void gen_impc(IR::ImpCast& impc);
   void gen_nop(IR::Nop& nop);
   void cleanup_stack();

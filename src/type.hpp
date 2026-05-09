@@ -4,11 +4,12 @@
 #include "utils.hpp"
 
 #include <cassert>
-#include <cstdint>
+#include <numeric>
 #include <string>
 #include <memory>
 #include <variant>
 #include <optional>
+#include <unordered_map>
 
 struct Type
 {
@@ -25,14 +26,33 @@ struct Type
     STR,
     F32,
     F64,
-    BOOL,
+    BYTE,
     VOID,
   };
-  struct Custom
+  struct Struct
   {
-    explicit Custom(std::string name) : name(std::move(name)) {}
+    explicit Struct(std::string name) : name(std::move(name)), body(std::make_shared<Body>()) {}
     std::string name;
-    bool operator==(const Custom& other) const { return name == other.name; };
+    struct Body
+    {
+      std::unordered_map<std::string, size_t> offsets;
+      std::unordered_map<std::string, std::shared_ptr<Type>> types;
+    };
+
+    std::shared_ptr<Body> body;
+    bool operator==(const Struct& other) const { return name == other.name; };
+
+    void insert_mem(std::shared_ptr<Type> tp, const std::string& mem)
+    {
+      assert(!body->offsets.count(mem) && "Duplicated member");
+      size_t cur_off = std::accumulate(
+        body->types.begin(), body->types.end(), 0LL,
+        [&](long long off, const std::pair<std::string, std::shared_ptr<Type>>& p)
+        { return off + p.second->size(); }
+      );
+      body->offsets[mem] = cur_off;
+      body->types.try_emplace(mem, tp);
+    }
   };
 
   struct Ptr
@@ -50,25 +70,20 @@ struct Type
     bool operator==(const Arr& other) const { return *of == *other.of && size == other.size; }
   };
 
-  std::variant<Base, Ptr, Arr, Custom> type;
-  explicit Type (std::string id)
+  std::variant<Base, Ptr, Arr, Struct> type;
+  explicit Type(std::string id)
   {
     if (auto base_t = string_to_base_t(id))
     {
       type = *base_t;
       return;
     }
-    type = Custom{ std::move(id) };
+    type = Struct{ std::move(id) };
   }
 
-  explicit Type (std::variant<Base, Ptr, Arr, Custom> tp)
+  explicit Type (std::variant<Base, Ptr, Arr, Struct> tp)
   { type = std::move(tp); }
-  /*
-  explicit Type(Ident id) : name(std::move(id)), ptr(nullptr) {}
-  explicit Type(std::string id) : name(Ident(std::move(id))), ptr(nullptr) {}
-  explicit Type(Ident id, std::shared_ptr<Type> ptr) : name(std::move(id)), ptr(std::move(ptr)) {}
-  explicit Type(std::string id, std::shared_ptr<Type> ptr) : name(Ident(std::move(id))), ptr(std::move(ptr)) {}
-  */
+
   [[nodiscard]] bool is_base_t() const
   {
     return std::holds_alternative<Base>(type);
@@ -82,6 +97,11 @@ struct Type
   [[nodiscard]] bool is_ptr_t() const
   {
     return std::holds_alternative<Ptr>(type);
+  }
+
+  [[nodiscard]] bool is_struct_t() const
+  {
+    return std::holds_alternative<Struct>(type);
   }
 
   [[nodiscard]] bool is_int() const
@@ -103,12 +123,12 @@ struct Type
     return false;
   }
    bool operator==(const Type& other) const { return type == other.type; }
-  [[nodiscard]] uint32_t size() const
+  [[nodiscard]] size_t size() const
   {
     return std::visit(
       Utils::overloaded
       {
-        [](const Base& bt) -> uint32_t
+        [](const Base& bt) -> size_t
         {
           switch (bt)
           {
@@ -117,7 +137,7 @@ struct Type
 
             case Base::I8:
             case Base::U8:
-            case Base::BOOL:
+            case Base::BYTE:
               return 1;
 
             case Base::I16:
@@ -139,18 +159,21 @@ struct Type
               return 0;
           }
         },
-        [](const Ptr& t) -> uint32_t
+        [](const Ptr& t) -> size_t
         {
           return 8;
         },
-        [](const Arr& t) -> uint32_t
+        [](const Arr& t) -> size_t
         {
           return 8;
         },
-        [](const Custom& ct) -> uint32_t
+        [](const Struct& st) -> size_t
         {
-          assert(false && "NYI");
-          return 0;
+          size_t tot = std::accumulate(
+            st.body->types.begin(), st.body->types.end(), 0LL,
+            [&](long long off, const std::pair<std::string, std::shared_ptr<Type>>& p) { return off + p.second->size(); }
+          );
+          return tot;
         },
       }, type
     );
@@ -170,9 +193,9 @@ struct Type
         {
           return t.of;
         },
-        [](const Custom& ct) -> std::shared_ptr<Type>
+        [](const Struct& st) -> std::shared_ptr<Type>
         {
-          assert(false && "NYI");
+          assert(false && "type.inner() on struct is ambiguous");
           return nullptr;
         },
       }, type
@@ -203,8 +226,8 @@ struct Type
       return Base::F32;
     else if (str == "f64")
       return Base::F64;
-    else if (str == "bool")
-      return Base::BOOL;
+    else if (str == "byte")
+      return Base::BYTE;
     else if (str == "void")
       return Base::VOID;
     return {};
@@ -225,7 +248,7 @@ struct Type
       case Base::STR:  return "STR";
       case Base::F32:  return "F32";
       case Base::F64:  return "F64";
-      case Base::BOOL: return "BOOL";
+      case Base::BYTE: return "BYTE";
       case Base::VOID: return "VOID";
       default: return "UNKNOWN";
     }
@@ -236,7 +259,7 @@ struct Type
     return Type::to_string(*type.to) + "*";
   }
 
-  static std::string to_string(const Type::Custom& type)
+  static std::string to_string(const Type::Struct& type)
   {
     return type.name;
   }
@@ -268,13 +291,14 @@ struct Type
           if (bt == Base::F32) return 305;
           if (bt >= Base::I8 && bt <= Base::I64) return 100 + Type(bt).size() + 5;
           if (bt >= Base::U8 && bt <= Base::U64) return 100 + Type(bt).size();
+          if (bt == Base::BYTE) return 50;
           return 1;
         },
         [](const Ptr& ptr) -> int
         { return 400; },
         [](const Arr& arr) -> int
         { return 500; },
-        [](const Custom& ct) -> int
+        [](const Struct& ct) -> int
         { return 1000; }
       }, type
     );
@@ -282,9 +306,9 @@ struct Type
 };
 
 template <>
-struct std::hash<Type::Custom>
+struct std::hash<Type::Struct>
 {
-  size_t operator()(const Type::Custom& t) const noexcept
+  size_t operator()(const Type::Struct& t) const noexcept
   {
     return std::hash<std::string>{}(t.name);
   }
@@ -305,7 +329,7 @@ struct std::hash<Type::Arr>
   size_t operator()(const Type::Arr& t) const noexcept
   {
     auto h1 = std::hash<Type*>{}(t.of.get());
-    // auto h2 = std::hash<uint32_t>{}(t.size);
+    // auto h2 = std::hash<size_t>{}(t.size);
     return h1; // ^ (h2 << 1);
   }
 };
@@ -316,7 +340,7 @@ struct std::hash<Type>
   size_t operator()(const Type& t) const noexcept
   {
     size_t h = std::visit([](auto&& arg) { return std::hash<std::decay_t<decltype(arg)>>{}(arg); }, t.type);
-    return h ^ (std::hash<uint32_t>{}(t.type.index()) << 1);
+    return h ^ (std::hash<size_t>{}(t.type.index()) << 1);
   }
 };
 

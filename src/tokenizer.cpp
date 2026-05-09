@@ -33,6 +33,12 @@ std::vector<Token> Tokenizer::tokenize()
         buffer += m_src[m_index];
         consume();
       }
+      #define OP(name, str) if (buffer == str) { tokens.emplace_back(TokenTypes::Keyword::name); } else
+      KEYWORD_LIST
+      #undef OP
+      { tokens.emplace_back(TokenTypes::Literal::IDENT, buffer); }
+      buffer.clear();
+      /*
       if (buffer == "return")
       {
         tokens.emplace_back(TokenTypes::Keyword::RET);
@@ -69,11 +75,12 @@ std::vector<Token> Tokenizer::tokenize()
       {
         tokens.emplace_back(TokenTypes::Keyword::IMPORT);
       }
-      else
+      else if (buffer == "struct")
       {
-        tokens.emplace_back(TokenTypes::Literal::IDENT, buffer);
+        tokens.emplace_back(TokenTypes::Keyword::STRUCT);
       }
-      buffer.clear();
+      */
+      // else
     }
     else if (peek().value() == '=')
     {
@@ -124,6 +131,11 @@ std::vector<Token> Tokenizer::tokenize()
       {
         consume();
         tokens.emplace_back(TokenTypes::Symbol::DEC);
+      }
+      else if (peek() && peek().value() == '>')
+      {
+        consume();
+        tokens.emplace_back(TokenTypes::Symbol::ARROW);
       }
       else
         tokens.emplace_back(TokenTypes::Symbol::SUB);
@@ -226,6 +238,11 @@ std::vector<Token> Tokenizer::tokenize()
     {
       consume();
       tokens.emplace_back(TokenTypes::Symbol::LCUR);
+    }
+    else if (peek().value() == '.')
+    {
+      consume();
+      tokens.emplace_back(TokenTypes::Symbol::DOT);
     }
     else if (peek().value() == ' ' || peek().value() == '\n' ||
              peek().value() == '\t')

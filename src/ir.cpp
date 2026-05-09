@@ -23,6 +23,8 @@ void IRGen::Visitor::visit(const Node::BinExpr& bin_expr) { m_gen.gen_bin_expr(b
 
 void IRGen::Visitor::visit(const Node::UnExpr& un_expr) { m_gen.gen_un_expr(un_expr); }
 
+void IRGen::Visitor::visit(const Node::MemberExpr& mem_expr) { m_gen.gen_mem_expr(mem_expr); };
+
 void IRGen::Visitor::visit(const Node::Ident& ident) { m_gen.gen_ident(ident); }
 
 void IRGen::Visitor::visit(const Node::Int& int_) { m_gen.gen_int(int_); }
@@ -148,6 +150,8 @@ void IRGen::gen_fn(const Node::Func& func)
 
 void IRGen::gen_struct(const Node::Struct& strct)
 {
+  // noop
+
   /// ???
   /// for (auto member : strct.members)
   /// {
@@ -172,7 +176,7 @@ void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
     m_stack.push(lhs);
   }
 
-  match_types();
+  if (bin_expr.op != BinOp::DOT && bin_expr.op != BinOp::ARROW && bin_expr.op != BinOp::ASG) match_types();
 
   IR::Operand lhs_oper = m_stack.top();
   m_stack.pop();
@@ -281,10 +285,15 @@ void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
       m_stack.emplace(new_r);
       break;
     case BinOp::ASG:
-      m_instructs->emplace_back(
-          IR::Binop{ new_r , lhs_oper, BinOp::ASG, rhs_oper });
-      m_stack.emplace(new_r);
-      break;
+      {
+        coerce(rhs_oper, IR::get_type(lhs_oper));
+        auto new_rhs = m_stack.top();
+        m_stack.pop();
+        m_instructs->emplace_back(
+            IR::Binop{ new_r , lhs_oper, BinOp::ASG, new_rhs });
+        m_stack.emplace(new_r);
+        break;
+      }
     case BinOp::LT:
       m_instructs->emplace_back(
           IR::Binop{ new_r, lhs_oper, BinOp::LT, rhs_oper });
@@ -405,10 +414,141 @@ void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
       }
       else assert(0);
       break;
+    case BinOp::DOT:
+      {
+        /*
+        IR::Reg reg(IR::get_type(lhs_oper));
+        IR::Reg idx(Type{ Type::Base::I64 });
+        m_instructs->emplace_back(IR::Store(reg, lhs_oper));
+        m_instructs->emplace_back(IR::Store(idx, rhs_oper));
+  
+        m_stack.emplace(
+          IR::Mem(
+            IR::get_type(rhs_oper),
+            {},
+            reg,
+            idx,
+            IR::Lit(1, Type(Type::Base::I32))
+          )
+        );
+        */
+
+        new_r.type = Type(Type::Ptr(std::make_shared<Type>(new_r.type)));
+
+        IR::Reg idx(Type{ Type::Base::I64 });
+        coerce(rhs_oper, Type(Type::Base::I64));
+        auto new_rhs = m_stack.top();
+        m_stack.pop();
+
+        m_instructs->emplace_back(IR::Store(idx, new_rhs));
+        m_instructs->emplace_back(
+            IR::Unop{ new_r, lhs_oper, UnOp::ADDR_OF });
+        m_instructs->emplace_back(
+            IR::Binop{ new_r, new_r, BinOp::ADD, idx });
+
+        assert(std::holds_alternative<IR::Lit>(rhs_oper));
+        auto off = std::get<IR::Lit>(rhs_oper);
+
+        assert(new_r.type.inner()->is_struct_t());
+        auto stc = std::get<Type::Struct>(new_r.type.inner()->type);
+        std::string tmem;
+        for (auto& [mem, os] : stc.body->offsets)
+          if (os == off.value)
+          {
+            tmem = mem;
+            break;
+          }
+
+        if (tmem.empty())
+          Utils::panic("Struct access failed..");
+
+        m_stack.emplace(
+          IR::Mem(
+            *stc.body->types.at(tmem),
+            {},
+            new_r,
+            {},
+            {}
+          )
+        );
+        /*
+        IR::Reg new_r2(IR::get_type(rhs_oper));
+        m_instructs->emplace_back(
+            IR::Unop{ new_r2, new_r, UnOp::DEREF });
+        m_stack.emplace(new_r2);
+        */
+        break;
+      }
+      break;
+    case BinOp::ARROW:
+      {
+        // new_r.type = Type(Type::Ptr(std::make_shared<Type>(new_r.type)));
+
+        IR::Reg idx(Type{ Type::Base::I64 });
+        coerce(rhs_oper, Type(Type::Base::I64));
+        auto new_rhs = m_stack.top();
+        m_stack.pop();
+
+        m_instructs->emplace_back(IR::Store(idx, new_rhs));
+        m_instructs->emplace_back(
+            IR::Store(new_r, lhs_oper));
+        m_instructs->emplace_back(
+            IR::Binop{ new_r, new_r, BinOp::ADD, idx });
+
+        assert(std::holds_alternative<IR::Lit>(rhs_oper));
+        auto off = std::get<IR::Lit>(rhs_oper);
+
+        assert(new_r.type.inner()->is_struct_t());
+        auto stc = std::get<Type::Struct>(new_r.type.inner()->type);
+        std::string tmem;
+        for (auto& [mem, os] : stc.body->offsets)
+          if (os == off.value)
+          {
+            tmem = mem;
+            break;
+          }
+
+        if (tmem.empty())
+          Utils::panic("Struct access failed..");
+
+        m_stack.emplace(
+          IR::Mem(
+            *stc.body->types.at(tmem),
+            {},
+            new_r,
+            {},
+            {}
+          )
+        );
+        /*
+        IR::Reg new_r2(IR::get_type(rhs_oper));
+        m_instructs->emplace_back(
+            IR::Unop{ new_r2, new_r, UnOp::DEREF });
+        m_stack.emplace(new_r2);
+        */
+        break;
+      }
     default:
       Logger::warn("IR BinExpr fell through...");
       break;
   }
+}
+
+void IRGen::gen_mem_expr(const Node::MemberExpr& mem_expr)
+{
+  mem_expr.expr->accept(m_visitor);
+  IR::Operand lhs_oper = m_stack.top();
+  m_stack.pop();
+
+  auto* reg = std::get_if<IR::Reg>(&lhs_oper);
+  assert(reg != nullptr);
+
+  auto* strct_tp = std::get_if<Type::Struct>(&reg->type.type);
+  assert(strct_tp != nullptr);
+
+  size_t off = strct_tp->body->offsets.at(mem_expr.member);
+  Type tp = *strct_tp->body->types.at(mem_expr.member);
+  m_stack.emplace(IR::Mem(tp, IR::Lit(off, Type(Type::Base::I64)), *reg, {}, {}));
 }
 
 void IRGen::gen_un_expr(const Node::UnExpr& un_expr)
@@ -542,6 +682,21 @@ void IRGen::gen_asgn(const Node::Asgn& asgn)
     auto top = IR::Lit(0, *asgn.type);
     m_instructs->emplace_back(IR::Store(aid_to_r.at(sym.id), top));
     m_instructs->emplace_back(alloca);
+    return;
+  }
+  else if (auto* strct = std::get_if<Type::Struct>(&asgn.type->type))
+  {
+    auto dest = IR::Reg(*asgn.type);
+    auto sym = m_anl.sym_table.at(asgn.id.id);
+
+    size_t sz = asgn.type->size();
+    // auto allocc = IR::Allocc(sz);
+
+    aid_to_r.try_emplace(sym.id, dest);
+    // auto top = IR::Lit(0, *asgn.type);
+    auto top = IR::Lit(0, Type(Type::Base::I64));
+    m_instructs->emplace_back(IR::Store(aid_to_r.at(sym.id), top));
+    // m_instructs->emplace_back(allocc);
     return;
   }
   if (asgn.val)

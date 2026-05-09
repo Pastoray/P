@@ -2,7 +2,6 @@
 #include "tokenizer.hpp"
 #include "utils.hpp"
 
-#include <algorithm>
 #include <cassert>
 #include <memory>
 #include <optional>
@@ -11,9 +10,14 @@
 
 uint32_t Node::Ident::nid = 0;
 Parser::Parser(std::vector<Token>& tokens)
-    : m_tokens(std::move(tokens)), m_index(0)
-{
-}
+    : m_tokens(std::move(tokens)),
+      m_index(0),
+      m_types({
+        "i8", "i16", "i32", "i64",
+        "u8", "u16", "u32", "u64",
+        "f32", "f64", "string", "byte", "void"
+      })
+{}
 
 std::vector<Node::Node> Parser::parse_prog()
 {
@@ -241,26 +245,45 @@ std::optional<BinOp> Parser::parse_bin_op()
     consume();
     return BinOp::ASG;
   }
+  else if (tok1 == TokenTypes::Symbol::DOT)
+  {
+    consume();
+    return BinOp::DOT;
+  }
+  else if (tok1 == TokenTypes::Symbol::ARROW)
+  {
+    consume();
+    return BinOp::ARROW;
+  }
   return {};
 }
 
 std::optional<std::shared_ptr<Type>> Parser::parse_type()
 {
   auto tok = peek();
-  if (!tok.has_value())
+  if (!tok.has_value() || !tok->value.has_value() || !m_types.count(tok->value.value()))
     return {};
 
-  if (*tok == TokenTypes::Literal::IDENT)
-    if (auto btype = Type::string_to_base_t(tok->value.value()))
-    {
-      consume();
-      auto tp = std::make_shared<Type>(*btype);
+  if (auto btype = Type::string_to_base_t(tok->value.value()))
+  {
+    consume();
+    auto tp = std::make_shared<Type>(*btype);
 
-      for (; peek() && peek().value() == TokenTypes::Symbol::AST; consume())
-        tp = std::make_shared<Type>(Type::Ptr(tp));
+    for (; peek() && peek().value() == TokenTypes::Symbol::AST; consume())
+      tp = std::make_shared<Type>(Type::Ptr(tp));
 
-      return tp;
-    }
+    return tp;
+  }
+  else
+  {
+    consume();
+    auto tp = std::make_shared<Type>(Type::Struct(tok->value.value()));
+
+    for (; peek() && peek().value() == TokenTypes::Symbol::AST; consume())
+      tp = std::make_shared<Type>(Type::Ptr(tp));
+
+    return tp;
+  }
   return {};
 }
 
@@ -625,23 +648,27 @@ std::optional<std::vector<Node::Param>> Parser::parse_param_list()
 std::optional<Node::Struct> Parser::parse_struct()
 {
   if (!peek() || peek().value() != TokenTypes::Keyword::STRUCT)
-    return std::nullopt;
+    return {};
 
   consume();
 
-  Node::Struct struct_node(parse_lit_ident().value());
+  auto idt = parse_lit_ident();
+  assert(idt.has_value());
+  Node::Struct struct_node(idt.value());
+  m_types.insert(idt->name);
   consume(); // {
   while (peek() && peek().value() != TokenTypes::Symbol::RCUR)
   {
-    auto t1 = consume();
+    auto t1 = parse_type();
     auto t2 = consume();
 
-    assert(t1 == TokenTypes::Literal::IDENT && t2 == TokenTypes::Literal::IDENT);
-    struct_node.members.emplace_back(t1.value.value(), t2.value.value());
+    assert(t1.has_value() && t2 == TokenTypes::Literal::IDENT);
+    struct_node.members.emplace_back(**t1, t2.value.value());
 
     consume(); // ;
   }
   consume(); // }
+  consume(); // ;
   return struct_node;
 }
 
@@ -665,10 +692,8 @@ std::optional<Node::Func> Parser::parse_func()
     params = param_list.value();
 
   // RARROW (->)
-  if (peek() && peek().value() == TokenTypes::Symbol::SUB && peek(1) &&
-      peek(1).value() == TokenTypes::Symbol::GT)
+  if (peek() && peek().value() == TokenTypes::Symbol::ARROW)
   {
-    consume();
     consume();
     const auto type = parse_type();
     assert(type.has_value());
@@ -725,7 +750,9 @@ std::optional<std::shared_ptr<Node::Decl>> Parser::parse_decl()
 {
   if (peek() && peek().value() == TokenTypes::Keyword::FN)
     return std::make_shared<Node::Func>(parse_func().value());
-  return std::nullopt;
+  else if (peek() && peek().value() == TokenTypes::Keyword::STRUCT)
+    return std::make_shared<Node::Struct>(parse_struct().value());
+  return {};
 }
 
 std::optional<Node::Ret> Parser::parse_ret_stmt()

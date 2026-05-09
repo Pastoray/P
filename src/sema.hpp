@@ -53,11 +53,7 @@ public:
       FnExt(const std::string& mname, const std::vector<Node::Param>& prms);
     };
 
-    struct StcExt
-    {
-      uint32_t tot_sz;
-      explicit StcExt(uint32_t sz) : tot_sz(sz) {};
-    };
+    struct StcExt {};
 
     struct VarExt
     {
@@ -97,7 +93,7 @@ public:
     Scope* prev;
     Scope* next;
     std::unordered_map<std::string, Sema::Symbol> m_sym_table;
-    std::unordered_set<Type::Custom> m_types_table;
+    std::unordered_set<std::string> m_types_table;
   };
 
   struct Module
@@ -128,7 +124,7 @@ public:
   void analyze_func(const Node::Func&);
   void analyze_struct(const Node::Struct&);
 
-  ExprInfo analyze_bin_expr(const Node::BinExpr&);
+  ExprInfo analyze_bin_expr(Node::BinExpr&);
   ExprInfo analyze_un_expr(const Node::UnExpr&);
   ExprInfo analyze_ident(const Node::Ident&);
   ExprInfo analyze_int(const Node::Int&);
@@ -145,6 +141,8 @@ private:
   Scope* get_curr_scope();
   Module* load_module();
   void pop_scope();
+  void populate_stc(const Node::Ident& base, const Type::Struct& stc_t);
+  void populate_stc_t(Type::Struct& stc_t);
 
 private:
   Sema::Analysis g_anl;

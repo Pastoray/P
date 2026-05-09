@@ -25,6 +25,7 @@
   OP(SUB, "-") \
   OP(INC, "++") \
   OP(DEC, "--") \
+  OP(ARROW, "->") \
   OP(GT, ">") \
   OP(LT, "<") \
   OP(GTE, ">=") \
@@ -32,24 +33,25 @@
   OP(AMP, "&") \
   OP(PIPE, "|") \
   OP(NOT, "!") \
+  OP(DOT, ".") \
   OP(COL, ":") \
   OP(SEMICOL, ";")
 
 #define LITERAL_LIST \
-    OP(INT, "int") \
-    OP(IDENT, "ident")
+  OP(INT, "int") \
+  OP(IDENT, "ident")
 
 #define KEYWORD_LIST \
-    OP(IF, "if") \
-    OP(ELSE, "else") \
-    OP(FOR, "for") \
-    OP(CONTINUE, "continue") \
-    OP(BREAK, "break") \
-    OP(WHILE, "while") \
-    OP(FN, "fn") \
-    OP(RET, "return") \
-    OP(STRUCT, "struct") \
-    OP(IMPORT, "import")
+  OP(IF, "if") \
+  OP(ELSE, "else") \
+  OP(FOR, "for") \
+  OP(CONTINUE, "continue") \
+  OP(BREAK, "break") \
+  OP(WHILE, "while") \
+  OP(FN, "fn") \
+  OP(RET, "return") \
+  OP(STRUCT, "struct") \
+  OP(IMPORT, "import")
 
 namespace TokenTypes
 {
@@ -89,9 +91,11 @@ struct Token
   template <typename T>
   bool operator==(const T val) const
   {
-    static_assert(std::is_same_v<T, TokenTypes::Symbol> ||
-                  std::is_same_v<T, TokenTypes::Keyword> ||
-                  std::is_same_v<T, TokenTypes::Literal>);
+    static_assert(
+      std::is_same_v<T, TokenTypes::Symbol> ||
+      std::is_same_v<T, TokenTypes::Keyword> ||
+      std::is_same_v<T, TokenTypes::Literal>
+    );
     return (std::holds_alternative<T>(type) && std::get<T>(type) == val);
   }
 
@@ -166,9 +170,11 @@ struct Token
 template <typename T>
 bool operator==(const T val, const Token& t)
 {
-  static_assert(std::is_same_v<T, TokenTypes::Symbol> ||
-                std::is_same_v<T, TokenTypes::Keyword> ||
-                std::is_same_v<T, TokenTypes::Literal>);
+  static_assert(
+    std::is_same_v<T, TokenTypes::Symbol> ||
+    std::is_same_v<T, TokenTypes::Keyword> ||
+    std::is_same_v<T, TokenTypes::Literal>
+  );
   return t == val;
 }
 

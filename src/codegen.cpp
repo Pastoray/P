@@ -64,7 +64,7 @@ Suffix CodeGen::sfx(uint32_t sz)
     case (2): return Suffix::W;
     case (4): return Suffix::L;
     case (8): return Suffix::Q;
-    default: assert(false);
+    default:  return Suffix::Q; assert(false);
   }
 }
 
@@ -419,7 +419,7 @@ void CodeGen::IMPC(OperandPtr dest, OperandPtr val, IR::ImpCast::CastOp op)
       m_text << "mov" << sfx(&adest) << " " << poper << ", " << adest << "\n\t";
       break;
     case (IR::ImpCast::CastOp::TRUNC):
-      m_text << "mov" << sfx(&adest) << " " << aval << ", " << adest << "\n\t";
+      m_text << "mov" << sfx(&adest) << " " << Reg::as_sz(aval.base_reg, adest.type.inner()->size()) << ", " << adest << "\n\t";
       break;
     case (IR::ImpCast::CastOp::SI2FP):
     case (IR::ImpCast::CastOp::UI2FP):
@@ -464,6 +464,11 @@ void CodeGen::gen_alloca(IR::Alloca& alc)
   m_text << "\n\t";
 }
 
+void CodeGen::gen_allocc(IR::Allocc& alc)
+{
+  m_rbpoff -= alc.size;
+}
+
 void CodeGen::gen_impc(IR::ImpCast& impc)
 { IMPC(&impc.dest, &impc.val, impc.op); }
 
@@ -506,6 +511,7 @@ void CodeGen::gen_instr(IR::Instruct& instr)
       [this](IR::Nop& i) { gen_nop(i); },
       [this](IR::ImpCast& i) { gen_impc(i); },
       [this](IR::Alloca& i) { gen_alloca(i); },
+      [this](IR::Allocc& i) {},
       [this](std::shared_ptr<IR::Func>& i) { gen_fn(*i); },
       [](auto&) { std::cerr << "ERROR UNKNOWN INSTRUCTION" << std::endl; std::exit(-1); }
     }, instr
@@ -845,6 +851,10 @@ void CodeGen::gen_binop(IR::Binop& binop)
       break;
     case BinOp::IDX:
       IDX(&binop.lhs, &binop.rhs, &binop.dest);
+      break;
+    case BinOp::DOT:
+      assert(false);
+      // DOT(&binop.lhs, &binop.rhs, &binop.dest);
       break;
     default:
       Utils::panic("NYI BinOp");

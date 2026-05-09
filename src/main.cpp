@@ -69,11 +69,13 @@ int main(int argc, char* argv[])
   Sema analyzer(nodes);
   Sema::Analysis anl = analyzer.analyze();
   Logger::debug("Analyzing finished\n");
+  std::cout << std::flush;
 
   Logger::debug("IR Gen started\n");
   IRGen ir_gen(nodes, anl);
   auto ir_instructs = ir_gen.gen();
   Logger::debug("IR Gen finished\n");
+  std::cout << std::flush;
 
   Logger::debug("IR:", '\n');
   for (auto& instruct : ir_instructs) // Debug: Instructions
@@ -96,6 +98,7 @@ int main(int argc, char* argv[])
   CodeGen code_gen(ir_instructs);
   auto cg_iss = std::istringstream(code_gen.gen_code());
   Logger::debug("Code Gen finished\n");
+  std::cout << std::flush;
 
   std::string asm_str;
   if (disable_debug)

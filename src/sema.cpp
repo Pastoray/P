@@ -85,9 +85,59 @@ void Sema::analyze_stmt(const std::shared_ptr<Node::Stmt>& stmt)
     assert(false);
 }
 
-Sema::ExprInfo Sema::analyze_bin_expr(const Node::BinExpr& bin_expr)
+Sema::ExprInfo Sema::analyze_bin_expr(Node::BinExpr& bin_expr)
 {
   auto lhs_expri = analyze_expr(bin_expr.lhs);
+  /*
+  if (bin_expr.op == BinOp::DOT)
+  {
+    auto lhs = std::dynamic_pointer_cast<Node::Ident>(bin_expr.lhs);
+    assert(lhs != nullptr);
+
+    auto rhs = std::dynamic_pointer_cast<Node::Ident>(bin_expr.rhs);
+    assert(rhs != nullptr);
+
+    if (
+      g_anl.sym_table.find(lhs->id) != g_anl.sym_table.end() &&
+      std::get_if<Type::Struct>(&g_anl.sym_table.at(lhs->id).type.type)
+    )
+    {
+      auto stc_t = std::get_if<Type::Struct>(&g_anl.sym_table.at(lhs->id).type.type);
+      // assert(stc_t != nullptr);
+
+      auto ret_t = stc_t->types.at(rhs->name);
+      return Sema::ExprInfo(ret_t, ValCat::LVALUE);
+    }
+
+    assert(0);
+  }
+  */
+  if (bin_expr.op == BinOp::DOT)
+  {
+    auto rhs = std::dynamic_pointer_cast<Node::Ident>(bin_expr.rhs);
+    assert(rhs != nullptr);
+
+    auto* stc_t = std::get_if<Type::Struct>(&lhs_expri.type.type);
+    size_t off = stc_t->body->offsets.at(rhs->name);
+    bin_expr.rhs = std::make_shared<Node::Int>(off);
+    return ExprInfo(*stc_t->body->types.at(rhs->name), ValCat::LVALUE);
+  }
+  else if (bin_expr.op == BinOp::ARROW)
+  {
+    auto rhs = std::dynamic_pointer_cast<Node::Ident>(bin_expr.rhs);
+    assert(rhs != nullptr);
+
+    auto* ptr_t = std::get_if<Type::Ptr>(&lhs_expri.type.type);
+    assert(ptr_t != nullptr);
+
+    auto* stc_t = std::get_if<Type::Struct>(&ptr_t->to->type);
+    assert(stc_t != nullptr);
+
+    size_t off = stc_t->body->offsets.at(rhs->name);
+    bin_expr.rhs = std::make_shared<Node::Int>(off);
+    return ExprInfo(*stc_t->body->types.at(rhs->name), ValCat::LVALUE);
+  }
+
   auto rhs_expri = analyze_expr(bin_expr.rhs);
   // assert(lhs_expri.type == rhs_expri.type && "Undefined operations between different types");
 
@@ -192,8 +242,32 @@ void Sema::analyze_asgn(const Node::Asgn& asgn)
     t = *arr->of;
   }
 
-  m_scope_stack.back()->m_sym_table.emplace(asgn.id.name, Sema::Symbol(t, Sema::Symbol::VarExt(get_curr_scope()->prev == nullptr)));
-  g_anl.sym_table.try_emplace(asgn.id.id, m_scope_stack.back()->m_sym_table.at(asgn.id.name));
+  /*
+  if (auto* stc_t = std::get_if<Type::Struct>(&t.type))
+  {
+    bool ok = false;
+    for (int i = (int)m_scope_stack.size() - 1; i >= 0; i--)
+    {
+      if (m_scope_stack[i]->m_sym_table.count(stc_t->name))
+      {
+        m_scope_stack.back()->m_sym_table.emplace(
+          asgn.id.name,
+          m_scope_stack[i]->m_sym_table.at(stc_t->name)
+        );
+        // populate_stc(asgn.id.name, stc_t);
+        g_anl.sym_table.try_emplace(asgn.id.id, m_scope_stack.back()->m_sym_table.at(asgn.id.name));
+        ok = true;
+        break;
+      }
+    }
+    assert(ok);
+  }
+  */
+  // else
+  {
+    m_scope_stack.back()->m_sym_table.emplace(asgn.id.name, Sema::Symbol(t, Sema::Symbol::VarExt(get_curr_scope()->prev == nullptr)));
+    g_anl.sym_table.try_emplace(asgn.id.id, m_scope_stack.back()->m_sym_table.at(asgn.id.name));
+  }
 
   if (asgn.val)
   {
@@ -245,8 +319,34 @@ Sema::ExprInfo Sema::analyze_expr_stmt(const Node::ExprStmt& expr_stmt)
 
 void Sema::analyze_type_usage(const std::shared_ptr<Type>& type)
 {
+  std::visit(
+    Utils::overloaded
+    {
+      [&](Type::Base& b) {},
+      [&](Type::Ptr& p) { return analyze_type_usage(p.to); },
+      [&](Type::Arr& a) { return analyze_type_usage(a.of); },
+      [&](Type::Struct& s)
+      {
+        auto cur = get_curr_scope();
+        for (
+          ;
+          cur && cur->m_types_table.find(s.name) == cur->m_types_table.end();
+          cur = cur->prev
+        );
+        assert(cur != nullptr);
+        auto sym = cur->m_sym_table.at(s.name);
+        assert(sym.type.is_struct_t());
+        s = std::get<Type::Struct>(sym.type.type);
+      },
+    }, type->type
+  );
+    /*
   if (!is_valid_type(*type))
     Utils::panic("Invalid type encountered...");
+
+  if (type->is_struct_t())
+    populate_stc_t(std::get<Type::Struct>(type->type));
+    */
 }
 
 void Sema::analyze_func(const Node::Func& func)
@@ -312,17 +412,49 @@ void Sema::analyze_struct(const Node::Struct& strct)
   )
     Utils::panic("Struct redifinition for struct: '" + strct.id.name + "'");
 
+  auto st = Type::Struct(strct.id.name);
+  auto strct_ext = Sema::Symbol::StcExt();
+
+  get_curr_scope()->m_sym_table.try_emplace(strct.id.name, Sema::Symbol(Type(st), strct_ext));
+  g_anl.sym_table.try_emplace(strct.id.id, get_curr_scope()->m_sym_table.at(strct.id.name));
+  get_curr_scope()->m_types_table.insert(st.name);
+
+  auto resolve_type = [&](auto& self, auto& type) -> void
+  {
+    std::visit(
+      Utils::overloaded
+      {
+        [&](const Type::Base& b) {},
+        [&](const Type::Ptr& p) { self(self, *p.to); },
+        [&](const Type::Arr& a) { self(self, *a.of); },
+        [&](Type::Struct& s)
+        {
+          auto cur = get_curr_scope();
+          for (
+            ;
+            cur && cur->m_types_table.find(s.name) == cur->m_types_table.end();
+            cur = cur->prev
+          );
+          assert(cur != nullptr);
+          auto sym = cur->m_sym_table.at(s.name);
+          assert(sym.type.is_struct_t());
+          s.body = std::get<Type::Struct>(sym.type.type).body;
+          // s = std::get<Type::Struct>(sym.type.type);
+        },
+        [&](auto& other) { assert(false && "const struct"); }
+      }, type.type
+    );
+  };
+
+  for (auto& [type, member] : strct.members)
+  {
+    resolve_type(resolve_type, type);
+    st.insert_mem(std::make_shared<Type>(type), member.name);
+  }
+
   for (auto& [type, field] : strct.members)
     if (!is_valid_type(type))
       Utils::panic("Unknown type '" + Type::to_string(type) + "' in struct definition");
-
-  auto ct = Type::Custom(strct.id.name);
-  auto strct_t = Type(ct);
-  auto strct_ext = Sema::Symbol::StcExt(0);
-
-  get_curr_scope()->m_sym_table.try_emplace(strct.id.name, Sema::Symbol(strct_t, strct_ext));
-  g_anl.sym_table.try_emplace(strct.id.id, get_curr_scope()->m_sym_table.at(strct.id.name));
-  get_curr_scope()->m_types_table.insert(ct);
 }
 
 Sema::Scope* Sema::get_curr_scope()
@@ -350,9 +482,57 @@ bool Sema::is_valid_type(const Type& type)
       [&](const Type::Base& b) { return true; },
       [&](const Type::Ptr& p) { return is_valid_type(*p.to); },
       [&](const Type::Arr& a) { return is_valid_type(*a.of); },
-      [&](const Type::Custom& c) { return get_curr_scope()->m_types_table.find(c) != get_curr_scope()->m_types_table.end(); },
+      [&](const Type::Struct& s)
+      {
+        auto cur = get_curr_scope();
+        for (
+          ;
+          cur && cur->m_types_table.find(s.name) == cur->m_types_table.end();
+          cur = cur->prev
+        );
+        return cur != nullptr;
+      },
     }, type.type
   );
   return true;
 }
 
+void Sema::populate_stc_t(Type::Struct& stc_t)
+{
+  auto cur = get_curr_scope();
+  for (
+    ;
+    cur && cur->m_types_table.find(stc_t.name) == cur->m_types_table.end();
+    cur = cur->prev
+  );
+  assert(cur != nullptr);
+  auto sym = cur->m_sym_table.at(stc_t.name);
+  assert(sym.type.is_struct_t());
+  stc_t = std::get<Type::Struct>(sym.type.type);
+}
+
+void Sema::populate_stc(const Node::Ident& base, const Type::Struct& stc_t)
+{
+  /*
+  bool ok = false;
+  for (int i = (int)m_scope_stack.size() - 1; i >= 0; i--)
+  {
+    if (m_scope_stack[i]->m_sym_table.count(stc_t.name))
+    {
+      m_scope_stack.back()->m_sym_table.emplace(
+        base.name,
+        m_scope_stack[i]->m_sym_table.at(stc_t.name)
+      );
+      g_anl.sym_table.try_emplace(base.id, m_scope_stack.back()->m_sym_table.at(base.name));
+      ok = true;
+      break;
+    }
+  }
+  assert(ok);
+  for (auto& [member, type] : stc_t.types)
+  {
+    if (!type.is_struct_t()) {}
+    else populate_stc(member);
+  }
+  */
+}

@@ -1,32 +1,36 @@
-fn printi32(i32 x) -> ;
+fn printi32(i32 x) -> void;
 
-struct Player
+struct Node
 {
-  i32 id;
-  i64 score;
-  bool alive;
+  i32 value;
+  Node* next;
 };
 
-fn main() ->
+struct LinkedList
 {
-  Player p;
+  Node* head;
+  i32 size;
+};
 
-  p.id = 0;
-  p.score = 12;
-  p.alive = true;
-  p.alive = 0;
+fn main() -> void
+{
+  Node n1;
+  Node n2;
+  LinkedList list;
 
-  printi32(p.id);
-  printi64(p.score);
-  printbool(p.alive);
+  n1.value = 100;
+  n1.next = 0;
 
-  i64 idk = p.id + p.score;
-  i32 some = (&p)->id + (&p)->score;
+  n2.value = 200;
+  n2.next = &n1;
 
-  printi64(idk + some);
-  printi32(idk + some);
+  list.head = &n2;
+  list.size = 2;
+
+  Node* first = list.head;
+  Node* second = first->next;
+  
+  printi32(second->value);
 
   return 0;
 }
-
-

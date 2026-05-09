@@ -82,10 +82,10 @@ namespace IR
 
     explicit Mem(
       Type t,
-      std::optional<std::variant<Lit, Label>> disp = std::nullopt,
-      std::optional<Reg> base = std::nullopt,
-      std::optional<Reg> index = std::nullopt,
-      std::optional<Lit> scale = std::nullopt
+      std::optional<std::variant<Lit, Label>> disp,
+      std::optional<Reg> base,
+      std::optional<Reg> index,
+      std::optional<Lit> scale
     ) : type(std::move(t)), disp(std::move(disp)), base(std::move(base)), 
         index(std::move(index)), scale(std::move(scale)) {}
 
@@ -151,9 +151,12 @@ namespace IR
     Operand val;
 
     explicit Store(Operand d, Operand v) : dest(std::move(d)), val(std::move(v))
-    {
-      assert(!std::holds_alternative<Lit>(dest) && "IR::Store->dest can't be literal");
-    }
+    { assert(!std::holds_alternative<Lit>(dest) && "IR::Store->dest can't be literal"); }
+
+    /*
+    explicit Store(Operand d) : dest(std::move(d))
+    { assert(!std::holds_alternative<Lit>(dest) && "IR::Store->dest can't be literal"); }
+    */
 
     inline friend std::ostream& operator<<(std::ostream& os, const Store& store)
     {
@@ -371,12 +374,26 @@ namespace IR
       if (frm.is_int() && to.is_float())
         return (frm.is_signed() ? CastOp::SI2FP : CastOp::UI2FP);
 
+      if (frm.size() > to.size()) return CastOp::TRUNC;
       if (frm.size() == to.size()) return CastOp::BITCAST;
       return CastOp::BITCAST;
     }
     inline friend std::ostream& operator<<(std::ostream& os, const ImpCast& impc)
     {
       os << impc.dest << " = " << "[IMP_CAST(" << impc.op << ")] " << impc.val;
+      return os;
+    }
+  };
+
+  struct Allocc
+  {
+    explicit Allocc(size_t sz) : size(sz) {}
+    size_t size;
+
+    inline friend std::ostream& operator<<(std::ostream& os, const Allocc& alloc)
+    {
+      os << "[ALLOCC] = ";
+      os << alloc.size;
       return os;
     }
   };
@@ -407,7 +424,13 @@ namespace IR
     }
   };
 
-  using Instruct = std::variant<GStore, Store, Binop, Unop, Jmp, Jeq, Jne, Label, Call, std::shared_ptr<Func>, ImpCast, Alloca, Ret, Nop>;
+  using Instruct = std::variant<
+    GStore, Store, Binop, Unop,
+    Jmp, Jeq, Jne, Label, Call,
+    std::shared_ptr<Func>, ImpCast, Alloca, Allocc, 
+    Ret, Nop
+  >;
+
   inline std::ostream& operator<<(std::ostream& os, const Instruct& instr)
   {
     std::visit([&os](const auto& x) { os << x; }, instr);
@@ -464,6 +487,7 @@ class IRGen
 
     void visit(const Node::UnExpr&) override;
     void visit(const Node::BinExpr&) override;
+    void visit(const Node::MemberExpr&) override;
     void visit(const Node::Ident&) override;
     void visit(const Node::Int&) override;
     void visit(const Node::Call&) override;
@@ -486,8 +510,10 @@ private:
   void gen_struct(const Node::Struct&);
   void gen_un_expr(const Node::UnExpr&);
   void gen_bin_expr(const Node::BinExpr&);
+  void gen_mem_expr(const Node::MemberExpr&);
   void gen_ident(const Node::Ident&);
   void gen_int(const Node::Int&);
+  void gen_member(const Node::Member& mem);
   void gen_asgn(const Node::Asgn&);
 
   void gen_if(const Node::If&);
