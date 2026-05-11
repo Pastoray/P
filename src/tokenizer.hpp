@@ -51,6 +51,7 @@
   OP(FN, "fn") \
   OP(RET, "return") \
   OP(STRUCT, "struct") \
+  OP(UNION, "union") \
   OP(IMPORT, "import")
 
 namespace TokenTypes

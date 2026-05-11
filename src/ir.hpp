@@ -484,6 +484,7 @@ class IRGen
 
     void visit(const Node::Func&) override;
     void visit(const Node::Struct&) override;
+    void visit(const Node::Union&) override;
 
     void visit(const Node::UnExpr&) override;
     void visit(const Node::BinExpr&) override;
@@ -508,6 +509,7 @@ public:
 private:
   void gen_fn(const Node::Func&);
   void gen_struct(const Node::Struct&);
+  void gen_union(const Node::Union&);
   void gen_un_expr(const Node::UnExpr&);
   void gen_bin_expr(const Node::BinExpr&);
   void gen_mem_expr(const Node::MemberExpr&);

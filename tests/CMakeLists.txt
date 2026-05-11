@@ -5,6 +5,7 @@ set(
   PARSER_SOURCES
   ${SRC_DIR}/tokenizer.cpp
   ${SRC_DIR}/parser.cpp
+  ${SRC_DIR}/sema.cpp
 )
 
 add_executable(
@@ -48,4 +49,5 @@ add_e2e_test(ptr_swap "ptr_swap.p" "20\n10")
 add_e2e_test(arr "arr.p" "16\n2\n3\n4\n5\n6\n7\n1\n67\n0\n1\n2\n1\n2\n3\n2\n3\n4")
 add_e2e_test(impcast "impcast.p" "10\n4000\n105")
 add_e2e_test(struct "struct.p" "100")
+add_e2e_test(union "union.p" "42\n1000000\n1000000\n555\n555\n-1")
 

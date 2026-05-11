@@ -3,6 +3,7 @@
 
 #include "../src/tokenizer.hpp"
 #include "../src/parser.hpp"
+#include "../src/sema.hpp"
 #include <cassert>
 #include <iostream>
 
@@ -13,7 +14,8 @@ inline void test_parse_expr_simple()
   Tokenizer tokenizer(input);
   auto tokens = tokenizer.tokenize();
 
-  Parser parser(tokens);
+  Sema sema({});
+  Parser parser(tokens, sema);
   auto expr = parser.parse_expr();
 
   assert(expr.has_value());
@@ -27,7 +29,8 @@ inline void test_parse_expr_binop()
   Tokenizer tokenizer(input);
   auto tokens = tokenizer.tokenize();
 
-  Parser parser(tokens);
+  Sema sema({});
+  Parser parser(tokens, sema);
   auto expr = parser.parse_expr();
 
   assert(expr.has_value());

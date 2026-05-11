@@ -117,10 +117,19 @@ Sema::ExprInfo Sema::analyze_bin_expr(Node::BinExpr& bin_expr)
     auto rhs = std::dynamic_pointer_cast<Node::Ident>(bin_expr.rhs);
     assert(rhs != nullptr);
 
-    auto* stc_t = std::get_if<Type::Struct>(&lhs_expri.type.type);
-    size_t off = stc_t->body->offsets.at(rhs->name);
-    bin_expr.rhs = std::make_shared<Node::Int>(off);
-    return ExprInfo(*stc_t->body->types.at(rhs->name), ValCat::LVALUE);
+    if (auto* stc_t = std::get_if<Type::Struct>(&lhs_expri.type.type))
+    {
+      size_t off = stc_t->body->offsets.at(rhs->name);
+      bin_expr.rhs = std::make_shared<Node::Int>(off);
+      return ExprInfo(*stc_t->body->types.at(rhs->name), ValCat::LVALUE);
+    }
+    else if (auto* un_t = std::get_if<Type::Union>(&lhs_expri.type.type))
+    {
+      size_t off = un_t->body->offsets.at(rhs->name);
+      bin_expr.rhs = std::make_shared<Node::Int>(off);
+      return ExprInfo(*un_t->body->types.at(rhs->name), ValCat::LVALUE);
+    }
+    else assert(false);
   }
   else if (bin_expr.op == BinOp::ARROW)
   {
@@ -130,12 +139,19 @@ Sema::ExprInfo Sema::analyze_bin_expr(Node::BinExpr& bin_expr)
     auto* ptr_t = std::get_if<Type::Ptr>(&lhs_expri.type.type);
     assert(ptr_t != nullptr);
 
-    auto* stc_t = std::get_if<Type::Struct>(&ptr_t->to->type);
-    assert(stc_t != nullptr);
-
-    size_t off = stc_t->body->offsets.at(rhs->name);
-    bin_expr.rhs = std::make_shared<Node::Int>(off);
-    return ExprInfo(*stc_t->body->types.at(rhs->name), ValCat::LVALUE);
+    if (auto* stc_t = std::get_if<Type::Struct>(&ptr_t->to->type))
+    {
+      size_t off = stc_t->body->offsets.at(rhs->name);
+      bin_expr.rhs = std::make_shared<Node::Int>(off);
+      return ExprInfo(*stc_t->body->types.at(rhs->name), ValCat::LVALUE);
+    }
+    else if (auto* un_t = std::get_if<Type::Union>(&ptr_t->to->type))
+    {
+      size_t off = un_t->body->offsets.at(rhs->name);
+      bin_expr.rhs = std::make_shared<Node::Int>(off);
+      return ExprInfo(*un_t->body->types.at(rhs->name), ValCat::LVALUE);
+    }
+    else assert(false);
   }
 
   auto rhs_expri = analyze_expr(bin_expr.rhs);
@@ -223,6 +239,9 @@ void Sema::analyze_decl(const std::shared_ptr<Node::Decl>& decl)
 {
   if (auto strct = std::dynamic_pointer_cast<Node::Struct>(decl))
     analyze_struct(*strct);
+
+  else if (auto un = std::dynamic_pointer_cast<Node::Union>(decl))
+    analyze_union(*un);
 
   else if (auto func = std::dynamic_pointer_cast<Node::Func>(decl))
     analyze_func(*func);
@@ -338,6 +357,19 @@ void Sema::analyze_type_usage(const std::shared_ptr<Type>& type)
         assert(sym.type.is_struct_t());
         s = std::get<Type::Struct>(sym.type.type);
       },
+      [&](Type::Union& u)
+      {
+        auto cur = get_curr_scope();
+        for (
+          ;
+          cur && cur->m_types_table.find(u.name) == cur->m_types_table.end();
+          cur = cur->prev
+        );
+        assert(cur != nullptr);
+        auto sym = cur->m_sym_table.at(u.name);
+        assert(sym.type.is_union_t());
+        u = std::get<Type::Union>(sym.type.type);
+      },
     }, type->type
   );
     /*
@@ -424,9 +456,9 @@ void Sema::analyze_struct(const Node::Struct& strct)
     std::visit(
       Utils::overloaded
       {
-        [&](const Type::Base& b) {},
-        [&](const Type::Ptr& p) { self(self, *p.to); },
-        [&](const Type::Arr& a) { self(self, *a.of); },
+        [&](Type::Base& b) {},
+        [&](Type::Ptr& p) { self(self, *p.to); },
+        [&](Type::Arr& a) { self(self, *a.of); },
         [&](Type::Struct& s)
         {
           auto cur = get_curr_scope();
@@ -441,8 +473,21 @@ void Sema::analyze_struct(const Node::Struct& strct)
           s.body = std::get<Type::Struct>(sym.type.type).body;
           // s = std::get<Type::Struct>(sym.type.type);
         },
+        [&](Type::Union& u)
+        {
+          auto cur = get_curr_scope();
+          for (
+            ;
+            cur && cur->m_types_table.find(u.name) == cur->m_types_table.end();
+            cur = cur->prev
+          );
+          assert(cur != nullptr);
+          auto sym = cur->m_sym_table.at(u.name);
+          assert(sym.type.is_union_t());
+          u.body = std::get<Type::Union>(sym.type.type).body;
+        },
         [&](auto& other) { assert(false && "const struct"); }
-      }, type.type
+      }, const_cast<Type::TypeVar&>(type.type)
     );
   };
 
@@ -457,9 +502,82 @@ void Sema::analyze_struct(const Node::Struct& strct)
       Utils::panic("Unknown type '" + Type::to_string(type) + "' in struct definition");
 }
 
+void Sema::analyze_union(const Node::Union& un)
+{
+  if (
+    get_curr_scope()->m_sym_table.find(un.id.name) != get_curr_scope()->m_sym_table.end() &&
+    get_curr_scope()->m_sym_table.at(un.id.name).is_un()
+  )
+    Utils::panic("Union redifinition for union: '" + un.id.name + "'");
+
+  auto unt = Type::Union(un.id.name);
+  auto uni_ext = Sema::Symbol::UniExt();
+
+  get_curr_scope()->m_sym_table.try_emplace(un.id.name, Sema::Symbol(Type(unt), uni_ext));
+  g_anl.sym_table.try_emplace(un.id.id, get_curr_scope()->m_sym_table.at(un.id.name));
+  get_curr_scope()->m_types_table.insert(unt.name);
+
+  auto resolve_type = [&](auto& self, auto& type) -> void
+  {
+    std::visit(
+      Utils::overloaded
+      {
+        [&](Type::Base& b) {},
+        [&](Type::Ptr& p) { self(self, *p.to); },
+        [&](Type::Arr& a) { self(self, *a.of); },
+        [&](Type::Struct& s)
+        {
+          auto cur = get_curr_scope();
+          for (
+            ;
+            cur && cur->m_types_table.find(s.name) == cur->m_types_table.end();
+            cur = cur->prev
+          );
+          assert(cur != nullptr);
+          auto sym = cur->m_sym_table.at(s.name);
+          assert(sym.type.is_struct_t());
+          s.body = std::get<Type::Struct>(sym.type.type).body;
+          // s = std::get<Type::Struct>(sym.type.type);
+        },
+        [&](Type::Union& u)
+        {
+          auto cur = get_curr_scope();
+          for (
+            ;
+            cur && cur->m_types_table.find(u.name) == cur->m_types_table.end();
+            cur = cur->prev
+          );
+          assert(cur != nullptr);
+          auto sym = cur->m_sym_table.at(u.name);
+          assert(sym.type.is_union_t());
+          u.body = std::get<Type::Union>(sym.type.type).body;
+        },
+        [&](auto& other) { assert(false && "const struct"); }
+      }, const_cast<Type::TypeVar&>(type.type)
+    );
+  };
+
+  for (auto& [type, member] : un.members)
+  {
+    resolve_type(resolve_type, type);
+    unt.insert_mem(std::make_shared<Type>(type), member.name);
+  }
+
+  for (auto& [type, field] : un.members)
+    if (!is_valid_type(type))
+      Utils::panic("Unknown type '" + Type::to_string(type) + "' in struct definition");
+
+}
+
 Sema::Scope* Sema::get_curr_scope()
 {
   return m_scope_stack.back().get();
+}
+
+void Sema::push_scope()
+{
+  auto scp = std::make_unique<Scope>();
+  m_scope_stack.push_back(std::move(scp));
 }
 
 void Sema::pop_scope()
@@ -467,6 +585,42 @@ void Sema::pop_scope()
   assert(!m_scope_stack.empty());
   // get_curr_scope()->prev->next = nullptr;
   m_scope_stack.pop_back();
+}
+
+void Sema::register_struct_t(const Node::Struct& strct)
+{
+  auto st = Type::Struct(strct.id.name);
+  auto strct_ext = Sema::Symbol::StcExt();
+
+  get_curr_scope()->m_sym_table.try_emplace(strct.id.name, Sema::Symbol(Type(st), strct_ext));
+  g_anl.sym_table.try_emplace(strct.id.id, get_curr_scope()->m_sym_table.at(strct.id.name));
+  get_curr_scope()->m_types_table.insert(st.name);
+}
+
+void Sema::register_union_t(const Node::Union& un)
+{
+  auto uni = Type::Union(un.id.name);
+  auto un_ext = Sema::Symbol::StcExt();
+
+  get_curr_scope()->m_sym_table.try_emplace(un.id.name, Sema::Symbol(Type(uni), un_ext));
+  g_anl.sym_table.try_emplace(un.id.id, get_curr_scope()->m_sym_table.at(un.id.name));
+  get_curr_scope()->m_types_table.insert(uni.name);
+}
+
+bool Sema::is_type(const std::string& name)
+{
+  if (auto bt = Type::string_to_base_t(name)) return true;
+  auto scp = get_curr_scope();
+  for (; scp && !scp->m_sym_table.count(name); scp = scp->prev);
+  return scp != nullptr;
+}
+
+Type Sema::get_type(const std::string& name)
+{
+  if (auto bt = Type::string_to_base_t(name)) return Type(*bt);
+  auto scp = get_curr_scope();
+  for (; scp && !scp->m_sym_table.count(name); scp = scp->prev);
+  return scp->m_sym_table.at(name).type;
 }
 
 Sema::Module* Sema::load_module()
@@ -488,6 +642,16 @@ bool Sema::is_valid_type(const Type& type)
         for (
           ;
           cur && cur->m_types_table.find(s.name) == cur->m_types_table.end();
+          cur = cur->prev
+        );
+        return cur != nullptr;
+      },
+      [&](const Type::Union& u)
+      {
+        auto cur = get_curr_scope();
+        for (
+          ;
+          cur && cur->m_types_table.find(u.name) == cur->m_types_table.end();
           cur = cur->prev
         );
         return cur != nullptr;

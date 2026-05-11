@@ -19,6 +19,8 @@ void IRGen::Visitor::visit(const Node::Func& func) { m_gen.gen_fn(func); }
 
 void IRGen::Visitor::visit(const Node::Struct& strct) { m_gen.gen_struct(strct); }
 
+void IRGen::Visitor::visit(const Node::Union& un) { m_gen.gen_union(un); }
+
 void IRGen::Visitor::visit(const Node::BinExpr& bin_expr) { m_gen.gen_bin_expr(bin_expr); }
 
 void IRGen::Visitor::visit(const Node::UnExpr& un_expr) { m_gen.gen_un_expr(un_expr); }
@@ -158,6 +160,11 @@ void IRGen::gen_struct(const Node::Struct& strct)
   ///   m_instructs->emplace_back(IR::Load{new_reg(), sym_table[member.id]});
   /// }
   /// strct.scope->accept(*this);
+}
+
+void IRGen::gen_union(const Node::Union&)
+{
+  // Noop
 }
 
 void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
@@ -449,28 +456,54 @@ void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
         assert(std::holds_alternative<IR::Lit>(rhs_oper));
         auto off = std::get<IR::Lit>(rhs_oper);
 
-        assert(new_r.type.inner()->is_struct_t());
-        auto stc = std::get<Type::Struct>(new_r.type.inner()->type);
-        std::string tmem;
-        for (auto& [mem, os] : stc.body->offsets)
-          if (os == off.value)
-          {
-            tmem = mem;
-            break;
-          }
+        // assert(new_r.type.inner()->is_struct_t());
+        if (auto* stc = std::get_if<Type::Struct>(&new_r.type.inner()->type))
+        {
+          std::string tmem;
+          for (auto& [mem, os] : stc->body->offsets)
+            if (os == off.value)
+            {
+              tmem = mem;
+              break;
+            }
 
-        if (tmem.empty())
-          Utils::panic("Struct access failed..");
+          if (tmem.empty())
+            Utils::panic("Struct access failed..");
 
-        m_stack.emplace(
-          IR::Mem(
-            *stc.body->types.at(tmem),
-            {},
-            new_r,
-            {},
-            {}
-          )
-        );
+          m_stack.emplace(
+            IR::Mem(
+              *stc->body->types.at(tmem),
+              {},
+              new_r,
+              {},
+              {}
+            )
+          );
+        }
+        else if (auto* un = std::get_if<Type::Union>(&new_r.type.inner()->type))
+        {
+          std::string tmem;
+          for (auto& [mem, os] : un->body->offsets)
+            if (os == off.value)
+            {
+              tmem = mem;
+              break;
+            }
+
+          if (tmem.empty())
+            Utils::panic("Struct access failed..");
+
+          m_stack.emplace(
+            IR::Mem(
+              *un->body->types.at(tmem),
+              {},
+              new_r,
+              {},
+              {}
+            )
+          );
+        }
+        else assert(false);
         /*
         IR::Reg new_r2(IR::get_type(rhs_oper));
         m_instructs->emplace_back(
@@ -498,28 +531,54 @@ void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
         assert(std::holds_alternative<IR::Lit>(rhs_oper));
         auto off = std::get<IR::Lit>(rhs_oper);
 
-        assert(new_r.type.inner()->is_struct_t());
-        auto stc = std::get<Type::Struct>(new_r.type.inner()->type);
-        std::string tmem;
-        for (auto& [mem, os] : stc.body->offsets)
-          if (os == off.value)
-          {
-            tmem = mem;
-            break;
-          }
+        // assert(new_r.type.inner()->is_struct_t());
+        if (auto* stc = std::get_if<Type::Struct>(&new_r.type.inner()->type))
+        {
+          std::string tmem;
+          for (auto& [mem, os] : stc->body->offsets)
+            if (os == off.value)
+            {
+              tmem = mem;
+              break;
+            }
 
-        if (tmem.empty())
-          Utils::panic("Struct access failed..");
+          if (tmem.empty())
+            Utils::panic("Struct access failed..");
 
-        m_stack.emplace(
-          IR::Mem(
-            *stc.body->types.at(tmem),
-            {},
-            new_r,
-            {},
-            {}
-          )
-        );
+          m_stack.emplace(
+            IR::Mem(
+              *stc->body->types.at(tmem),
+              {},
+              new_r,
+              {},
+              {}
+            )
+          );
+        }
+        else if (auto* un = std::get_if<Type::Union>(&new_r.type.inner()->type))
+        {
+          std::string tmem;
+          for (auto& [mem, os] : un->body->offsets)
+            if (os == off.value)
+            {
+              tmem = mem;
+              break;
+            }
+
+          if (tmem.empty())
+            Utils::panic("Struct access failed..");
+
+          m_stack.emplace(
+            IR::Mem(
+              *un->body->types.at(tmem),
+              {},
+              new_r,
+              {},
+              {}
+            )
+          );
+        }
+        else assert(false);
         /*
         IR::Reg new_r2(IR::get_type(rhs_oper));
         m_instructs->emplace_back(

@@ -906,7 +906,15 @@ void CodeGen::DEC(OperandPtr src, OperandPtr dest)
 void CodeGen::NOT(OperandPtr src, OperandPtr dest)
 {
   auto adest = prepare_dest(dest);
+  MOV(src, dest);
   m_text << "not" << sfx(adest.type.inner()->size()) << " " << adest << "\n\t";
+}
+
+void CodeGen::NEG(OperandPtr src, OperandPtr dest)
+{
+  auto adest = prepare_dest(dest);
+  MOV(src, dest);
+  m_text << "neg" << sfx(adest.type.inner()->size()) << " " << adest << "\n\t";
 }
 
 void CodeGen::gen_unop(IR::Unop& unop)
@@ -952,6 +960,8 @@ void CodeGen::gen_unop(IR::Unop& unop)
       m_text << "notl " << dest << "\n\t";
       */
       break;
+    case UnOp::NEG:
+      NEG(&unop.src, &unop.dest);
   }
   m_text << "# unop (end)" << "\n\t";
 }

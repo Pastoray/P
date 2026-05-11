@@ -549,6 +549,7 @@ private:
   void INC(OperandPtr src, OperandPtr dest);
   void DEC(OperandPtr src, OperandPtr dest);
   void NOT(OperandPtr src, OperandPtr dest);
+  void NEG(OperandPtr src, OperandPtr dest);
 
 private:
   RegPool pool;

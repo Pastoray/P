@@ -3,6 +3,7 @@
 
 #include "utils.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <numeric>
 #include <string>
@@ -55,6 +56,27 @@ struct Type
     }
   };
 
+  struct Union
+  {
+    explicit Union(std::string name) : name(std::move(name)), body(std::make_shared<Body>()) {}
+    std::string name;
+    struct Body
+    {
+      std::unordered_map<std::string, size_t> offsets;
+      std::unordered_map<std::string, std::shared_ptr<Type>> types;
+    };
+
+    std::shared_ptr<Body> body;
+    bool operator==(const Union& other) const { return name == other.name; };
+
+    void insert_mem(std::shared_ptr<Type> tp, const std::string& mem)
+    {
+      assert(!body->offsets.count(mem) && "Duplicated member");
+      body->offsets[mem] = 0;
+      body->types.try_emplace(mem, tp);
+    }
+  };
+
   struct Ptr
   {
     explicit Ptr(std::shared_ptr<Type> to) : to(std::move(to)) {}
@@ -70,7 +92,8 @@ struct Type
     bool operator==(const Arr& other) const { return *of == *other.of && size == other.size; }
   };
 
-  std::variant<Base, Ptr, Arr, Struct> type;
+  using TypeVar = std::variant<Base, Ptr, Arr, Struct, Union>;
+  TypeVar type;
   explicit Type(std::string id)
   {
     if (auto base_t = string_to_base_t(id))
@@ -81,7 +104,7 @@ struct Type
     type = Struct{ std::move(id) };
   }
 
-  explicit Type (std::variant<Base, Ptr, Arr, Struct> tp)
+  explicit Type (TypeVar tp)
   { type = std::move(tp); }
 
   [[nodiscard]] bool is_base_t() const
@@ -102,6 +125,11 @@ struct Type
   [[nodiscard]] bool is_struct_t() const
   {
     return std::holds_alternative<Struct>(type);
+  }
+
+  [[nodiscard]] bool is_union_t() const
+  {
+    return std::holds_alternative<Union>(type);
   }
 
   [[nodiscard]] bool is_int() const
@@ -175,6 +203,14 @@ struct Type
           );
           return tot;
         },
+        [](const Union& un) -> size_t
+        {
+          auto it = std::max_element(
+            un.body->types.begin(), un.body->types.end(),
+            [&](const auto& a, const auto& b) { return a.second->size() < b.second->size(); }
+          );
+          return it->second->size();
+        },
       }, type
     );
   }
@@ -196,6 +232,11 @@ struct Type
         [](const Struct& st) -> std::shared_ptr<Type>
         {
           assert(false && "type.inner() on struct is ambiguous");
+          return nullptr;
+        },
+        [](const Union& un) -> std::shared_ptr<Type>
+        {
+          assert(false && "type.inner() on union is ambiguous");
           return nullptr;
         },
       }, type
@@ -263,6 +304,11 @@ struct Type
   {
     return type.name;
   }
+  
+  static std::string to_string(const Type::Union& type)
+  {
+    return type.name;
+  }
 
   static std::string to_string(const Type::Arr& type)
   {
@@ -299,7 +345,9 @@ struct Type
         [](const Arr& arr) -> int
         { return 500; },
         [](const Struct& ct) -> int
-        { return 1000; }
+        { return 1000; },
+        [](const Union& un) -> int
+        { return 999; }
       }, type
     );
   }
@@ -309,6 +357,15 @@ template <>
 struct std::hash<Type::Struct>
 {
   size_t operator()(const Type::Struct& t) const noexcept
+  {
+    return std::hash<std::string>{}(t.name);
+  }
+};
+
+template <>
+struct std::hash<Type::Union>
+{
+  size_t operator()(const Type::Union& t) const noexcept
   {
     return std::hash<std::string>{}(t.name);
   }

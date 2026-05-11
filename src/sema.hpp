@@ -54,6 +54,7 @@ public:
     };
 
     struct StcExt {};
+    struct UniExt {};
 
     struct VarExt
     {
@@ -64,13 +65,14 @@ public:
     };
 
     static uint32_t nid;
-    using Ext = std::variant<FnExt, StcExt, VarExt>;
+    using Ext = std::variant<FnExt, StcExt, UniExt, VarExt>;
     uint32_t id;
     Type type;
     Ext ext;
     explicit Symbol(Type type, Ext ext) : id(nid++), type(std::move(type)), ext(std::move(ext)) {}
     [[nodiscard]] bool is_fn() const { return std::holds_alternative<FnExt>(ext); }
     [[nodiscard]] bool is_st() const { return std::holds_alternative<StcExt>(ext); }
+    [[nodiscard]] bool is_un() const { return std::holds_alternative<UniExt>(ext); }
     [[nodiscard]] bool is_vr() const { return std::holds_alternative<VarExt>(ext); }
   };
 
@@ -110,6 +112,14 @@ public:
   };
 
 public:
+  void push_scope();
+  void pop_scope();
+
+  void register_struct_t(const Node::Struct& strct);
+  void register_union_t(const Node::Union& un);
+  bool is_type(const std::string& name);
+  Type get_type(const std::string& name);
+
   explicit Sema(const std::vector<Node::Node>&);
   ~Sema();
   Sema::Analysis analyze();
@@ -123,6 +133,7 @@ public:
   void analyze_scope(const Node::Scope&);
   void analyze_func(const Node::Func&);
   void analyze_struct(const Node::Struct&);
+  void analyze_union(const Node::Union&);
 
   ExprInfo analyze_bin_expr(Node::BinExpr&);
   ExprInfo analyze_un_expr(const Node::UnExpr&);
@@ -140,7 +151,6 @@ private:
   bool is_valid_type(const Type&);
   Scope* get_curr_scope();
   Module* load_module();
-  void pop_scope();
   void populate_stc(const Node::Ident& base, const Type::Struct& stc_t);
   void populate_stc_t(Type::Struct& stc_t);
 
@@ -148,6 +158,7 @@ private:
   Sema::Analysis g_anl;
   // Visitor m_visitor;
   std::vector<std::unique_ptr<Scope>> m_scope_stack;
+  std::unordered_map<std::string, Type> g_pre_sema;
   const std::vector<Node::Node>& m_nodes;
 };
 

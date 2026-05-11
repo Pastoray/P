@@ -53,8 +53,10 @@ int main(int argc, char* argv[])
   for (auto& token : tokens) // Debug: Tokens
     Logger::debug(token, '\n');
 
+  Sema pre_sema({});
+
   Logger::debug("Parsing started\n");
-  Parser parser(tokens);
+  Parser parser(tokens, pre_sema);
   std::vector<Node::Node> nodes = parser.parse_prog();
 
   Logger::debug("Parsing finished\n");

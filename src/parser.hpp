@@ -13,6 +13,8 @@
 #include "type.hpp"
 #include "utils.hpp"
 
+class Sema;
+
 class Parser;
 
 namespace Node
@@ -244,11 +246,13 @@ namespace Node
 
   struct Func;
   struct Struct;
+  struct Union;
   struct DeclVisitor
   {
     virtual ~DeclVisitor() = default;
     virtual void visit(const Func& func) = 0;
     virtual void visit(const Struct& strct) = 0;
+    virtual void visit(const Union& un) = 0;
   };
 
   struct Param : Ident
@@ -302,6 +306,22 @@ namespace Node
     void accept(DeclVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override {
       std::cout << std::string(ident, '\t') << "Node::Struct: " << id.name << " {\n";
+      for (const auto& [type, member_id] : members)
+      {
+        std::cout << std::string(ident + 1, '\t') << type << " " << member_id.name << "\n";
+      }
+      std::cout << std::string(ident, '\t') << "}\n";
+    }
+    Ident id;
+    std::vector<std::pair<Type, Ident>> members;
+  };
+
+  struct Union : Decl
+  {
+    explicit Union(Ident id) : id(std::move(id)) {}
+    void accept(DeclVisitor& v) override { v.visit(*this); }
+    void dump(int ident) const override {
+      std::cout << std::string(ident, '\t') << "Node::Union: " << id.name << " {\n";
       for (const auto& [type, member_id] : members)
       {
         std::cout << std::string(ident + 1, '\t') << member_id.name << "\n";
@@ -469,7 +489,7 @@ namespace Node
 class Parser
 {
 public:
-  explicit Parser(std::vector<Token>& tokens);
+  explicit Parser(std::vector<Token>& tokens, Sema& sema);
   std::vector<Node::Node> parse_prog();
   std::optional<UnOp> parse_un_op();
   std::optional<BinOp> parse_bin_op();
@@ -486,6 +506,7 @@ public:
   std::optional<std::shared_ptr<Node::Stmt>> parse_stmt();
   std::optional<Node::Scope> parse_scope();
   std::optional<Node::Struct> parse_struct();
+  std::optional<Node::Union> parse_union();
   std::optional<Node::Func> parse_func();
 
   std::optional<Node::Int> parse_lit_int();
@@ -537,7 +558,7 @@ private:
 
 private:
   const std::vector<Token> m_tokens;
-  std::set<std::string> m_types; // light types table
+  Sema& m_pre_sema;
   uint16_t m_index;
 };
 
