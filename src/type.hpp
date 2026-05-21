@@ -11,6 +11,7 @@
 #include <variant>
 #include <optional>
 #include <unordered_map>
+#include <vector>
 
 struct Type
 {
@@ -77,6 +78,15 @@ struct Type
     }
   };
 
+  struct Enum
+  {
+    explicit Enum(std::string name) : name(std::move(name)) {}
+    std::string name;
+    // std::shared_ptr<Type> tag;
+    std::unordered_map<std::string, std::shared_ptr<void>> enums;
+    bool operator==(const Enum& other) const { return name == other.name; };
+  };
+
   struct Ptr
   {
     explicit Ptr(std::shared_ptr<Type> to) : to(std::move(to)) {}
@@ -92,7 +102,7 @@ struct Type
     bool operator==(const Arr& other) const { return *of == *other.of && size == other.size; }
   };
 
-  using TypeVar = std::variant<Base, Ptr, Arr, Struct, Union>;
+  using TypeVar = std::variant<Base, Ptr, Arr, Struct, Union, Enum>;
   TypeVar type;
   explicit Type(std::string id)
   {
@@ -130,6 +140,11 @@ struct Type
   [[nodiscard]] bool is_union_t() const
   {
     return std::holds_alternative<Union>(type);
+  }
+
+  [[nodiscard]] bool is_enum_t() const
+  {
+    return std::holds_alternative<Enum>(type);
   }
 
   [[nodiscard]] bool is_int() const
@@ -211,6 +226,10 @@ struct Type
           );
           return it->second->size();
         },
+        [](const Enum& en) -> size_t
+        {
+          return 4;
+        },
       }, type
     );
   }
@@ -237,6 +256,11 @@ struct Type
         [](const Union& un) -> std::shared_ptr<Type>
         {
           assert(false && "type.inner() on union is ambiguous");
+          return nullptr;
+        },
+        [](const Enum& en) -> std::shared_ptr<Type>
+        {
+          assert(false && "type.inner() on enum is ambiguous");
           return nullptr;
         },
       }, type
@@ -310,6 +334,11 @@ struct Type
     return type.name;
   }
 
+  static std::string to_string(const Type::Enum& type)
+  {
+    return type.name;
+  }
+
   static std::string to_string(const Type::Arr& type)
   {
     return Type::to_string(*type.of) + "[" /* + std::to_string(type.size) */ + "]";
@@ -347,7 +376,9 @@ struct Type
         [](const Struct& ct) -> int
         { return 1000; },
         [](const Union& un) -> int
-        { return 999; }
+        { return 999; },
+        [](const Enum& en) -> int
+        { return 100 + 4; }
       }, type
     );
   }
@@ -366,6 +397,15 @@ template <>
 struct std::hash<Type::Union>
 {
   size_t operator()(const Type::Union& t) const noexcept
+  {
+    return std::hash<std::string>{}(t.name);
+  }
+};
+
+template <>
+struct std::hash<Type::Enum>
+{
+  size_t operator()(const Type::Enum& t) const noexcept
   {
     return std::hash<std::string>{}(t.name);
   }

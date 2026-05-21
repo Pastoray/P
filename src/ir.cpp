@@ -21,15 +21,21 @@ void IRGen::Visitor::visit(const Node::Struct& strct) { m_gen.gen_struct(strct);
 
 void IRGen::Visitor::visit(const Node::Union& un) { m_gen.gen_union(un); }
 
+void IRGen::Visitor::visit(const Node::Enum& en) { m_gen.gen_enum(en); }
+
 void IRGen::Visitor::visit(const Node::BinExpr& bin_expr) { m_gen.gen_bin_expr(bin_expr); }
 
 void IRGen::Visitor::visit(const Node::UnExpr& un_expr) { m_gen.gen_un_expr(un_expr); }
 
-void IRGen::Visitor::visit(const Node::MemberExpr& mem_expr) { m_gen.gen_mem_expr(mem_expr); };
+// void IRGen::Visitor::visit(const Node::MemberExpr& mem_expr) { m_gen.gen_mem_expr(mem_expr); };
 
 void IRGen::Visitor::visit(const Node::Ident& ident) { m_gen.gen_ident(ident); }
 
 void IRGen::Visitor::visit(const Node::Int& int_) { m_gen.gen_int(int_); }
+
+void IRGen::Visitor::visit(const Node::TypeRef& ref) { m_gen.gen_ref(ref); }
+
+void IRGen::Visitor::visit(const Node::TypeDef& def) { m_gen.gen_def(def); }
 
 void IRGen::Visitor::visit(const Node::Asgn& asgn) { m_gen.gen_asgn(asgn); }
 
@@ -163,6 +169,11 @@ void IRGen::gen_struct(const Node::Struct& strct)
 }
 
 void IRGen::gen_union(const Node::Union&)
+{
+  // Noop
+}
+
+void IRGen::gen_enum(const Node::Enum&)
 {
   // Noop
 }
@@ -593,6 +604,7 @@ void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
   }
 }
 
+/*
 void IRGen::gen_mem_expr(const Node::MemberExpr& mem_expr)
 {
   mem_expr.expr->accept(m_visitor);
@@ -609,6 +621,7 @@ void IRGen::gen_mem_expr(const Node::MemberExpr& mem_expr)
   Type tp = *strct_tp->body->types.at(mem_expr.member);
   m_stack.emplace(IR::Mem(tp, IR::Lit(off, Type(Type::Base::I64)), *reg, {}, {}));
 }
+*/
 
 void IRGen::gen_un_expr(const Node::UnExpr& un_expr)
 {
@@ -716,11 +729,21 @@ void IRGen::gen_int(const Node::Int& int_)
   m_stack.emplace(IR::Lit(int_.val, Type(Type::Base::I32)));
 }
 
+void IRGen::gen_ref(const Node::TypeRef& ref)
+{
+
+}
+
+void IRGen::gen_def(const Node::TypeDef& def)
+{
+
+}
+
 void IRGen::gen_asgn(const Node::Asgn& asgn)
 {
-  if (auto* arr = std::get_if<Type::Arr>(&asgn.type->type))
+  if (auto* arr = std::get_if<Type::Arr>(&Node::get_res_t(asgn.type)->type))
   {
-    auto dest = IR::Reg(*asgn.type);
+    auto dest = IR::Reg(*Node::get_res_t(asgn.type));
     auto sym = m_anl.sym_table.at(asgn.id.id);
     auto alloca = IR::Alloca(dest, {});
     
@@ -738,17 +761,17 @@ void IRGen::gen_asgn(const Node::Asgn& asgn)
     std::reverse(alloca.dims.begin(), alloca.dims.end());
     r_to_arr_dims.try_emplace(dest, alloca.dims);
     aid_to_r.try_emplace(sym.id, dest);
-    auto top = IR::Lit(0, *asgn.type);
+    auto top = IR::Lit(0, *Node::get_res_t(asgn.type));
     m_instructs->emplace_back(IR::Store(aid_to_r.at(sym.id), top));
     m_instructs->emplace_back(alloca);
     return;
   }
-  else if (auto* strct = std::get_if<Type::Struct>(&asgn.type->type))
+  else if (auto* strct = std::get_if<Type::Struct>(&Node::get_res_t(asgn.type)->type))
   {
-    auto dest = IR::Reg(*asgn.type);
+    auto dest = IR::Reg(*Node::get_res_t(asgn.type));
     auto sym = m_anl.sym_table.at(asgn.id.id);
 
-    size_t sz = asgn.type->size();
+    size_t sz = Node::get_res_t(asgn.type)->size();
     // auto allocc = IR::Allocc(sz);
 
     aid_to_r.try_emplace(sym.id, dest);
@@ -791,7 +814,7 @@ void IRGen::gen_asgn(const Node::Asgn& asgn)
   else
     if (auto* ext = std::get_if<Sema::Symbol::VarExt>(&m_anl.sym_table.at(asgn.id.id).ext))
     {
-      auto top = IR::Lit(0, *asgn.type);
+      auto top = IR::Lit(0, *Node::get_res_t(asgn.type));
       if (ext->is_global)
       {
         m_instructs->emplace_back(IR::GStore(IR::Label::create_data(asgn.id.name, IR::get_type(top)), top));

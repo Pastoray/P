@@ -52,6 +52,7 @@
   OP(RET, "return") \
   OP(STRUCT, "struct") \
   OP(UNION, "union") \
+  OP(ENUM, "enum") \
   OP(IMPORT, "import")
 
 namespace TokenTypes
@@ -100,7 +101,7 @@ struct Token
     return (std::holds_alternative<T>(type) && std::get<T>(type) == val);
   }
 
-  friend std::string to_string(const Token& tok)
+  static std::string to_string(const Token& tok)
   {
     struct Visitor
     {

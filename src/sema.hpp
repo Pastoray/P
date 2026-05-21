@@ -55,6 +55,7 @@ public:
 
     struct StcExt {};
     struct UniExt {};
+    struct EnuExt {};
 
     struct VarExt
     {
@@ -65,7 +66,7 @@ public:
     };
 
     static uint32_t nid;
-    using Ext = std::variant<FnExt, StcExt, UniExt, VarExt>;
+    using Ext = std::variant<FnExt, StcExt, UniExt, EnuExt, VarExt>;
     uint32_t id;
     Type type;
     Ext ext;
@@ -73,6 +74,7 @@ public:
     [[nodiscard]] bool is_fn() const { return std::holds_alternative<FnExt>(ext); }
     [[nodiscard]] bool is_st() const { return std::holds_alternative<StcExt>(ext); }
     [[nodiscard]] bool is_un() const { return std::holds_alternative<UniExt>(ext); }
+    [[nodiscard]] bool is_en() const { return std::holds_alternative<EnuExt>(ext); }
     [[nodiscard]] bool is_vr() const { return std::holds_alternative<VarExt>(ext); }
   };
 
@@ -117,6 +119,7 @@ public:
 
   void register_struct_t(const Node::Struct& strct);
   void register_union_t(const Node::Union& un);
+  void register_enum_t(const Node::Enum& en);
   bool is_type(const std::string& name);
   Type get_type(const std::string& name);
 
@@ -124,7 +127,9 @@ public:
   ~Sema();
   Sema::Analysis analyze();
 
-  void analyze_type_usage(const std::shared_ptr<Type>&);
+  // void analyze_type_usage(const std::shared_ptr<Type>&);
+  void analyze_type_ref(const Node::TypeRef& ref);
+  void analyze_type_def(const Node::TypeDef& def);
   ExprInfo analyze_expr(const std::shared_ptr<Node::Expr>&);
   ExprInfo analyze_lit(const std::shared_ptr<Node::Lit>&);
   void analyze_decl(const std::shared_ptr<Node::Decl>&);
@@ -134,6 +139,7 @@ public:
   void analyze_func(const Node::Func&);
   void analyze_struct(const Node::Struct&);
   void analyze_union(const Node::Union&);
+  void analyze_enum(const Node::Enum&);
 
   ExprInfo analyze_bin_expr(Node::BinExpr&);
   ExprInfo analyze_un_expr(const Node::UnExpr&);
@@ -165,7 +171,7 @@ private:
 inline Sema::Symbol::FnExt::FnExt(const std::string& mname, const std::vector<Node::Param>& prms) : mang_name(mname)
 {
   for (auto& prm : prms)
-    params.emplace_back(prm.type, VarExt());
+    params.emplace_back(*prm.type.res_t, VarExt());
 };
 
 #endif // SEMA_H

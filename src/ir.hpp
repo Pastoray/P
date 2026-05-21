@@ -485,14 +485,17 @@ class IRGen
     void visit(const Node::Func&) override;
     void visit(const Node::Struct&) override;
     void visit(const Node::Union&) override;
+    void visit(const Node::Enum&) override;
 
     void visit(const Node::UnExpr&) override;
     void visit(const Node::BinExpr&) override;
-    void visit(const Node::MemberExpr&) override;
+    // void visit(const Node::MemberExpr&) override;
     void visit(const Node::Ident&) override;
     void visit(const Node::Int&) override;
     void visit(const Node::Call&) override;
 
+    void visit(const Node::TypeRef&) override;
+    void visit(const Node::TypeDef&) override;
     void visit(const Node::Asgn&) override;
     void visit(const Node::If&) override;
     void visit(const Node::For&) override;
@@ -510,14 +513,17 @@ private:
   void gen_fn(const Node::Func&);
   void gen_struct(const Node::Struct&);
   void gen_union(const Node::Union&);
+  void gen_enum(const Node::Enum&);
   void gen_un_expr(const Node::UnExpr&);
   void gen_bin_expr(const Node::BinExpr&);
-  void gen_mem_expr(const Node::MemberExpr&);
+  // void gen_mem_expr(const Node::MemberExpr&);
   void gen_ident(const Node::Ident&);
   void gen_int(const Node::Int&);
-  void gen_member(const Node::Member& mem);
+  // void gen_member(const Node::Member& mem);
   void gen_asgn(const Node::Asgn&);
 
+  void gen_ref(const Node::TypeRef&);
+  void gen_def(const Node::TypeDef&);
   void gen_if(const Node::If&);
   void gen_for(const Node::For&);
   void gen_continue(const Node::Continue&);

@@ -6,7 +6,6 @@
 #include <optional>
 #include <variant>
 #include <vector>
-#include <set>
 
 #include "tokenizer.hpp"
 #include "shared_ops.hpp"
@@ -29,7 +28,6 @@ namespace Node
   };
   struct UnExpr;
   struct BinExpr;
-  struct MemberExpr;
   struct Lit;
   struct Ident;
   struct Int;
@@ -39,7 +37,6 @@ namespace Node
     virtual ~ExprVisitor() = default;
     virtual void visit(const UnExpr& un_expr) = 0;
     virtual void visit(const BinExpr& bin_expr) = 0;
-    virtual void visit(const MemberExpr& mem_expr) = 0;
     virtual void visit(const Ident& ident) = 0;
     virtual void visit(const Int& int_) = 0;
     virtual void visit(const Call& call) = 0;
@@ -55,11 +52,14 @@ namespace Node
   struct Break;
   struct Ret;
   struct ExprStmt;
+  struct TypeRef;
+  struct TypeDef;
   struct StmtVisitor
   {
     virtual ~StmtVisitor() = default;
+    virtual void visit(const TypeRef& ref) = 0;
+    virtual void visit(const TypeDef& def) = 0;
     virtual void visit(const Asgn& asgn) = 0;
-    // virtual void visit(const ReAsgn& asgn) = 0;
     virtual void visit(const If& if_) = 0;
     virtual void visit(const For& for_) = 0;
     virtual void visit(const Continue& cnt) = 0;
@@ -150,25 +150,6 @@ namespace Node
     bool pref;
   };
 
-  struct MemberExpr : Expr
-  {
-    std::shared_ptr<Expr> expr;
-    std::string member;
-    void accept(ExprVisitor& v) override { v.visit(*this); }
-    void dump(int ident) const override
-    {
-      std::cout << std::string(ident, '\t') << "Node::UnExpr {\n";
-      if (expr)
-      {
-        std::cout << std::string(ident + 1, '\t') << "expr: " << '\n';
-        expr->dump(ident + 1);
-      }
-      // std::cout << std::string(ident + 1, '\t') << "op: " << op << '\n';
-      // std::cout << std::string(ident + 1, '\t') << "kind: " << (pref ? "prefix" : "suffix") << '\n';
-      std::cout << std::string(ident, '\t') << "}\n";
-    }
-  };
-
   struct BinExpr : Expr
   {
     explicit BinExpr(std::shared_ptr<Expr> lhs, BinOp op,
@@ -197,13 +178,6 @@ namespace Node
     std::shared_ptr<Expr> lhs;
     BinOp op;
     std::shared_ptr<Expr> rhs;
-  };
-
-  struct Member : Node::Expr
-  {
-    explicit Member(Type t, const int val) : type(std::move(t)), off(val) {}
-    Type type;
-    int off;
   };
 
   struct Call : Expr
@@ -244,26 +218,73 @@ namespace Node
     }
   };
 
+  struct TypeRef : Stmt
+  {
+    explicit TypeRef() : res_t(nullptr) {}
+    explicit TypeRef(std::shared_ptr<Type> type) : res_t(std::move(type)) {}
+    mutable std::shared_ptr<Type> res_t;
+
+    void accept(StmtVisitor& v) override { v.visit(*this); }
+    void dump(int ident) const override {}
+  };
+
+  struct Struct;
+  struct Union;
+  struct Enum;
+  struct TypeDef : Stmt
+  {
+    explicit TypeDef(
+      std::variant<
+        std::shared_ptr<Struct>,
+        std::shared_ptr<Union>,
+        std::shared_ptr<Enum>
+      > type
+    ) : type(std::move(type)), res_t(nullptr) {}
+
+    std::variant<
+      std::shared_ptr<Struct>,
+      std::shared_ptr<Union>,
+      std::shared_ptr<Enum>
+    > type;
+    mutable std::shared_ptr<Type> res_t;
+
+    void accept(StmtVisitor& v) override { v.visit(*this); }
+    void dump(int ident) const override {}
+  };
+
+  inline std::shared_ptr<Type> get_res_t(const std::variant<TypeDef, TypeRef>& var)
+  {
+    return std::visit(
+      Utils::overloaded
+      {
+        [&](const Node::TypeDef& def) -> std::shared_ptr<Type> { return def.res_t; },
+        [&](const Node::TypeRef& ref) -> std::shared_ptr<Type> { return ref.res_t; }
+      }, var
+    );
+  }
+
   struct Func;
   struct Struct;
   struct Union;
+  struct Enum;
   struct DeclVisitor
   {
     virtual ~DeclVisitor() = default;
     virtual void visit(const Func& func) = 0;
     virtual void visit(const Struct& strct) = 0;
     virtual void visit(const Union& un) = 0;
+    virtual void visit(const Enum& en) = 0;
   };
 
   struct Param : Ident
   {
-    explicit Param(Type type, std::string id) : Ident(std::move(id)), type(std::move(type)) {}
-    Type type;
+    explicit Param(TypeRef type, std::string id) : Ident(std::move(id)), type(std::move(type)) {}
+    TypeRef type;
   };
 
   struct Func : Decl, Callable
   {
-    explicit Func(Ident&& id, Type type) : id(std::move(id)), ret_type(std::move(type)) {}
+    explicit Func(Ident&& id, TypeRef rtype) : id(std::move(id)), ret_type(std::move(rtype)) {}
     void accept(DeclVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override
     {
@@ -297,7 +318,7 @@ namespace Node
     Ident id;
     std::vector<Param> params;
     std::optional<Scope> scope; // std::optional for forward declarations
-    Type ret_type;
+    TypeRef ret_type;
   };
 
   struct Struct : Decl
@@ -306,14 +327,18 @@ namespace Node
     void accept(DeclVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override {
       std::cout << std::string(ident, '\t') << "Node::Struct: " << id.name << " {\n";
+      std::cout << std::string(ident + 1, '\t') << "SCOPE";
+      /*
       for (const auto& [type, member_id] : members)
       {
         std::cout << std::string(ident + 1, '\t') << type << " " << member_id.name << "\n";
       }
+      */
       std::cout << std::string(ident, '\t') << "}\n";
     }
     Ident id;
-    std::vector<std::pair<Type, Ident>> members;
+    // std::optional<Scope> scp;
+    std::vector<std::pair<std::variant<TypeDef, TypeRef>, Ident>> members;
   };
 
   struct Union : Decl
@@ -322,15 +347,88 @@ namespace Node
     void accept(DeclVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override {
       std::cout << std::string(ident, '\t') << "Node::Union: " << id.name << " {\n";
+      std::cout << std::string(ident + 1, '\t') << "SCOPE";
+      /*
       for (const auto& [type, member_id] : members)
       {
         std::cout << std::string(ident + 1, '\t') << member_id.name << "\n";
       }
+      */
       std::cout << std::string(ident, '\t') << "}\n";
     }
     Ident id;
-    std::vector<std::pair<Type, Ident>> members;
+    // std::optional<Scope> scp;
+    std::vector<std::pair<std::variant<TypeDef, TypeRef>, Ident>> members;
   };
+
+  struct Asgn : Stmt
+  {
+    Ident id;
+    std::variant<TypeDef, TypeRef> type;
+    std::optional<std::variant<std::shared_ptr<Expr>, std::shared_ptr<Decl>>> val;
+    Asgn(std::variant<TypeDef, TypeRef> type, std::string id) : type(std::move(type)), id(std::move(id)), val() {}
+    Asgn(std::variant<TypeDef, TypeRef> type, std::string id, std::shared_ptr<Expr> expr)
+        : type(std::move(type)), id(std::move(id)), val(expr)
+    {}
+    void accept(StmtVisitor& v) override { v.visit(*this); }
+    void dump(int ident) const override;
+  };
+
+  struct Enum : Decl
+  {
+    explicit Enum(std::string id) : id(std::move(id)) {}
+    void accept(DeclVisitor& v) override { v.visit(*this); }
+    void dump(int ident) const override {
+      std::cout << std::string(ident, '\t') << "Node::Enum: " << id.name << " {\n";
+      for (const auto& en : enums)
+      {
+        std::cout << std::string(ident + 1, '\t') << en.id.name << "\n";
+      }
+      std::cout << std::string(ident, '\t') << "}\n";
+    }
+    Ident id;
+    std::vector<Asgn> enums;
+  };
+
+
+  inline void Asgn::dump(int ident) const
+  {
+    std::cout << std::string(ident, '\t') << "Node::Asgn {\n";
+    std::cout << std::string(ident + 1, '\t') << "type: " <<
+    std::visit(
+      Utils::overloaded
+      {
+        [](const TypeDef& td) -> std::string
+        {
+          return std::visit(
+            Utils::overloaded
+            {
+              [](const std::shared_ptr<Node::Struct>& stc) -> std::string { return stc->id.name; },
+              [](const std::shared_ptr<Node::Union>& uni) -> std::string { return uni->id.name; },
+              [](const std::shared_ptr<Node::Enum>& enm) -> std::string {
+  return enm->id.name; }
+            }, td.type
+          );
+        },
+        [](const TypeRef& tr) -> std::string { return Type::to_string(*tr.res_t); }
+      }
+    , type) << "\n";
+    std::cout << std::string(ident + 1, '\t') << "name: " << id.name << "\n";
+    std::cout << std::string(ident + 1, '\t') << "id: " << id.id << "\n";
+    
+    // Dump the value (Expr or Decl)
+    if (val)
+      std::visit([ident](auto&& arg)
+      {
+        if (arg)
+        {
+          std::cout << std::string(ident + 1, '\t') << "val:\n";
+          arg->dump(ident + 2);
+        }
+      }, *val);
+
+    std::cout << std::string(ident, '\t') << "}\n";
+  }
 
   struct Import : Stmt
   {
@@ -342,37 +440,6 @@ namespace Node
       std::cout << std::string(ident, '\t') << "}\n";
     };
     std::vector<Ident> mod;
-  };
-
-  struct Asgn : Stmt
-  {
-    Ident id;
-    std::shared_ptr<Type> type;
-    std::optional<std::variant<std::shared_ptr<Expr>, std::shared_ptr<Decl>>> val;
-    Asgn(std::shared_ptr<Type> type, std::string& id) : type(std::move(type)), id(id), val() {}
-    Asgn(std::shared_ptr<Type> type, std::string& id, std::shared_ptr<Expr> expr)
-        : type(std::move(type)), id(id), val(expr)
-    {}
-    void accept(StmtVisitor& v) override { v.visit(*this); }
-    void dump(int ident) const override {
-      std::cout << std::string(ident, '\t') << "Node::Asgn {\n";
-      std::cout << std::string(ident + 1, '\t') << "type: " << *type << "\n";
-      std::cout << std::string(ident + 1, '\t') << "name: " << id.name << "\n";
-      std::cout << std::string(ident + 1, '\t') << "id: " << id.id << "\n";
-      
-      // Dump the value (Expr or Decl)
-      if (val)
-        std::visit([ident](auto&& arg)
-        {
-          if (arg)
-          {
-            std::cout << std::string(ident + 1, '\t') << "val:\n";
-            arg->dump(ident + 2);
-          }
-        }, *val);
-
-      std::cout << std::string(ident, '\t') << "}\n";
-    }
   };
 
   struct If : Stmt
@@ -507,6 +574,7 @@ public:
   std::optional<Node::Scope> parse_scope();
   std::optional<Node::Struct> parse_struct();
   std::optional<Node::Union> parse_union();
+  std::optional<Node::Enum> parse_enum();
   std::optional<Node::Func> parse_func();
 
   std::optional<Node::Int> parse_lit_int();
@@ -524,7 +592,10 @@ public:
   std::optional<std::vector<std::shared_ptr<Node::Expr>>> parse_arg_list();
   std::optional<Node::Call> parse_call_expr();
   std::optional<Node::Node> parse_node();
-  std::optional<std::shared_ptr<Type>> parse_type();
+  std::optional<Node::TypeRef> parse_type_ref();
+  std::optional<Node::TypeDef> parse_type_def();
+  std::optional<std::variant<Node::TypeDef, Node::TypeRef>> parse_type();
+  void parse_arr(std::variant<Node::TypeDef, Node::TypeRef>& type);
   void parse_arr(std::shared_ptr<Type>&);
   std::optional<Node::Import> parse_import();
 

@@ -24,7 +24,7 @@ std::vector<Token> Tokenizer::tokenize()
 
       buffer.clear();
     }
-    else if (std::isalpha(peek().value()))
+    else if (std::isalpha(peek().value()) || peek() == '_')
     {
       buffer += peek().value();
       consume();
