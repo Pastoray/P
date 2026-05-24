@@ -9,12 +9,12 @@ class Logger
 public:
   Logger() = delete;
   template <typename... Args>
-  static void log(Args&&... args) { ((stream << std::forward<Args>(args)), ...); }
+  static void log(Args&&... args) { (stream << ... << std::forward<Args>(args)); stream << std::endl; }
 
   template <typename... Args>
   static void debug(Args&&... args)
   {
-    stream << "[DEUBG] ";
+    stream << "[DEBUG] ";
     log(std::forward<Args>(args)...);
   }
 
