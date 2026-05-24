@@ -788,6 +788,11 @@ void IRGen::gen_asgn(const Node::Asgn& asgn)
         [this, &asgn](const std::shared_ptr<Node::Expr>& expr)
         {
           expr->accept(m_visitor);
+          {
+            auto top = m_stack.top();
+            m_stack.pop();
+            coerce(top, *Node::get_res_t(asgn.type));
+          }
           auto sym = m_anl.sym_table.at(asgn.id.id);
           if (auto* ext = std::get_if<Sema::Symbol::VarExt>(&sym.ext))
           {
@@ -966,7 +971,10 @@ void IRGen::gen_ret(const Node::Ret& ret_)
 
 void IRGen::gen_call(const Node::Call& call)
 {
-  IR::Reg ret_reg((Type(Type::Base::I32)));
+  auto sym = m_anl.sym_table.at(call.callable.id);
+  assert(sym.is_fn());
+  IR::Reg ret_reg(sym.type);
+  // IR::Reg ret_reg((Type(Type::Base::I32)));
   IR::Call ir_call(ret_reg);
   ir_call.callable = call.callable.name;
   for (auto& expr : call.args)

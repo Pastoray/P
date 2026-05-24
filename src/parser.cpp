@@ -676,17 +676,17 @@ std::optional<std::vector<Node::Param>> Parser::parse_param_list()
 {
   std::vector<Node::Param> params;
   consume();
-  while (peek() && peek().value() == TokenTypes::Literal::IDENT && peek(1) &&
-         peek(1).value() == TokenTypes::Literal::IDENT)
+  while (true)
   {
-    auto type = parse_type_ref();
-    std::string name_str = *consume().value;
+    if (auto type = parse_type_ref())
+    {
+      std::string name_str = *consume().value;
 
-    params.emplace_back(*type, std::move(name_str));
-    if (peek() && peek().value() == TokenTypes::Symbol::COM)
-      consume();
-    else
-      break;
+      params.emplace_back(*type, std::move(name_str));
+      if (peek() && peek().value() == TokenTypes::Symbol::COM) consume();
+      else break;
+    }
+    else break;
   }
   consume();
   return params;

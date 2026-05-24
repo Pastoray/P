@@ -197,7 +197,8 @@ Sema::ExprInfo Sema::analyze_call(const Node::Call& call)
     );
     if (found)
     {
-      // g_anl.sym_table.try_emplace(call.callable.id, m_scope_stack[i]->m_sym_table.at(call.callable.name));
+      assert(g_anl.sym_table.find(call.callable.id) == g_anl.sym_table.end());
+      g_anl.sym_table.try_emplace(call.callable.id, m_scope_stack[i]->m_sym_table.at(call.callable.name));
       for (auto& arg : call.args)
         analyze_expr(arg);
       return Sema::ExprInfo(m_scope_stack[i]->m_sym_table.at(call.callable.name).type, ValCat::RVALUE);

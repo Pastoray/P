@@ -288,7 +288,7 @@ namespace Node
     void accept(DeclVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override
     {
-      std::cout << std::string(ident, '\t') << "Node::Func: " << id.name << " {\n";
+      std::cout << std::string(ident, '\t') << "Node::Func: " << id.name << "(" << id.id << ")" << " {\n";
       
       if (!params.empty()) {
         std::cout << std::string(ident + 1, '\t') << "params: [\n";
@@ -298,7 +298,7 @@ namespace Node
         std::cout << std::string(ident + 1, '\t') << "]\n";
       }
 
-      std::cout << std::string(ident + 1, '\t') << "returns: " << "Type_Info_Here" << "\n";
+      std::cout << std::string(ident + 1, '\t') << "return: " << *ret_type.res_t << "\n";
 
       if (scope.has_value()) {
         std::cout << std::string(ident + 1, '\t') << "body: {\n";
