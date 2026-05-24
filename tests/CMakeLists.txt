@@ -51,4 +51,5 @@ add_e2e_test(impcast "impcast.p" "10\n4000\n105")
 add_e2e_test(struct "struct.p" "100")
 add_e2e_test(union "union.p" "42\n1000000\n1000000\n555\n555\n-1")
 add_e2e_test(enum "enum.p" "1\n403\n404\n100")
+add_e2e_test(malloc "malloc.p" "16\n64")
 
