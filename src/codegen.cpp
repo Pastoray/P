@@ -386,15 +386,15 @@ void CodeGen::CMP(OperandPtr lhs, OperandPtr rhs)
 
 void CodeGen::IMPC(OperandPtr dest, OperandPtr val, IR::ImpCast::CastOp op)
 {
-  m_text << "# cast (start)\n\t";
+  m_text << "# cast (start) " << "(" << op << ")" << "\n\t";
   m_text << "# prepare (start)\n\t";
   auto adest = prepare_dest(dest);
   auto aval = prepare_oper(val);
   m_text << "# prepare (end)\n\t";
-  auto tmp = pool.alloc_any(8);
-  auto poper = PreOper(adest.type, tmp, false, 0, false, nullptr);
+  auto tmp = pool.alloc_any(adest.type.inner()->size());
+  auto poper = PreOper(*adest.type.inner(), tmp, false, 0, false, nullptr);
 
-  if (aval.type.size() == adest.type.size())
+  if (aval.type.size() == adest.type.inner()->size())
   {
     m_text << "# CAST SAME SIZE (NOOP)\n\t";
     m_text << "mov" << sfx(&adest) << " " << aval << ", " << adest << "\n\t";
@@ -404,9 +404,12 @@ void CodeGen::IMPC(OperandPtr dest, OperandPtr val, IR::ImpCast::CastOp op)
   switch (op)
   {
     case (IR::ImpCast::CastOp::ZEXT):
-      if (aval.type.size() == 4 && adest.type.size() == 8)
+      if (aval.type.size() == 4 && adest.type.inner()->size() == 8)
       {
-        m_text << "movl " << aval << ", " << Reg::to32(adest.base_reg) << "\n\t";
+        if (adest.indirect)
+          m_text << "movl " << aval << ", " << adest << "\n\t";
+        else
+          m_text << "movl " << aval << ", " << Reg::to32(adest.base_reg) << "\n\t";
       }
       else
       {
@@ -443,11 +446,17 @@ void CodeGen::gen_alloca(IR::Alloca& alc)
 {
   {
     auto tmp = pool.alloc_any(8);
+    // auto tp = Type(Type::Ptr(std::make_shared<Type>(Type::Base::I64)));
+    // auto poper = PreOper(tp, tmp, true, 0, false, &pool);
     auto poper = PreOper(Type(Type::Base::I64), tmp, false, 0, false, &pool);
     auto val = IR::Operand(IR::Lit(4, Type(Type::Base::I64)));
     MOV(&val, &poper);
     auto dtmp = pool.alloc_any(8);
-    auto dpoper = PreOper(Type(Type::Base::I64), dtmp, false, 0, false, &pool);
+
+    // only reason this works is sizeof(ptr) == sizeof(i64)
+    auto tp = Type(Type::Ptr(std::make_shared<Type>(Type::Base::I64)));
+    auto dpoper = PreOper(tp, dtmp, false, 0, false, &pool);
+    // auto dpoper = PreOper(Type(Type::Base::I64), dtmp, false, 0, false, &pool);
     for (auto& d : alc.dims)
     {
       IMPC(&dpoper, &d, IR::ImpCast::CastOp::ZEXT);
@@ -572,7 +581,9 @@ PreOper CodeGen::prepare_dest(IR::Operand* oper)
         // gen.m_text << "movl " << gen.format_operand(mem.index.value()) << ", " << tmp3 << "\n\t";
         // tmp3.reg = Reg::to64(tmp3);
         auto oper = IR::Operand(mem.index.value());
-        auto poper = PreOper(Type(Type::Base::I64), tmp3, false, 0, false, &gen.pool);
+        auto tp = Type(Type::Ptr(std::make_shared<Type>(Type::Base::I64)));
+        auto poper = PreOper(tp, tmp3, false, 0, false, &gen.pool);
+        // auto poper = PreOper(Type(Type::Base::I64), tmp3, false, 0, false, &gen.pool);
         // gen.MOV(&oper, &poper);
         gen.IMPC(&poper, &oper, IR::ImpCast::CastOp::ZEXT);
 
@@ -650,7 +661,9 @@ PreOper CodeGen::prepare_oper(IR::Operand* oper)
       {
         // gen.m_text << "movq " << gen.format_operand(mem.index.value()) << ", " << tmp3 << "\n\t";
         auto oper = IR::Operand(mem.index.value());
-        auto poper = PreOper(Type(Type::Base::I64), tmp3, false, 0, false, &gen.pool);
+        auto tp = Type(Type::Ptr(std::make_shared<Type>(Type::Base::I64)));
+        auto poper = PreOper(tp, tmp3, false, 0, false, &gen.pool);
+        // auto poper = PreOper(Type(Type::Base::I64), tmp3, false, 0, false, &gen.pool);
         // gen.MOV(&oper, &poper);
         gen.IMPC(&poper, &oper, IR::ImpCast::CastOp::ZEXT);
       }
@@ -1129,6 +1142,12 @@ void CodeGen::gen_call(IR::Call& call)
     if (pool.usage.count(param_regs[i])) pool.unlock(param_regs[i]);
   }
 
+  if (IR::get_type(call.dest).size() <= 0)
+  {
+    Logger::warn("Unexpected return size");
+    Logger::warn("Skipping return..");
+    return;
+  }
   const auto& dest = format_operand(call.dest);
   m_text << "movl %eax, " << dest << "\n\t";
 }
