@@ -48,18 +48,18 @@ int main(int argc, char* argv[])
   Logger::debug("Tokenization started\n");
   Tokenizer tokenizer(src.str());
   std::vector<Token> tokens = tokenizer.tokenize();
-  Logger::debug("Tokenization finished\n");
-  Logger::debug("TOKENS:", '\n');
+  Logger::debug("Tokenization finished");
+  Logger::debug("TOKENS:");
   for (auto& token : tokens) // Debug: Tokens
-    Logger::debug(token, '\n');
+    Logger::debug(token);
 
   Sema pre_sema({});
 
-  Logger::debug("Parsing started\n");
+  Logger::debug("Parsing started");
   Parser parser(tokens, pre_sema);
   std::vector<Node::Node> nodes = parser.parse_prog();
 
-  Logger::debug("Parsing finished\n");
+  Logger::debug("Parsing finished");
 
   std::cout << "--- AST Dump ---" << std::endl;
   std::cout << "Node count: " << nodes.size() << std::endl;
@@ -67,21 +67,22 @@ int main(int argc, char* argv[])
     std::visit([](auto&& arg) { if (arg) arg->dump(0); }, node);
   std::cout << std::flush;
 
-  Logger::debug("Analyzing started\n");
+  Logger::debug("Analyzing started");
   Sema analyzer(nodes);
   Sema::Analysis anl = analyzer.analyze();
-  Logger::debug("Analyzing finished\n");
+  Logger::debug("Analyzing finished");
   std::cout << std::flush;
 
-  Logger::debug("IR Gen started\n");
+  Logger::debug("IR Gen started");
   IRGen ir_gen(nodes, anl);
   auto ir_instructs = ir_gen.gen();
-  Logger::debug("IR Gen finished\n");
+  Logger::debug("IR Gen finished");
   std::cout << std::flush;
 
-  Logger::debug("IR:", '\n');
+  Logger::debug("IR:");
   for (auto& instruct : ir_instructs) // Debug: Instructions
-    std::cout << instruct << '\n';
+    Logger::debug(instruct);
+    // std::cout << instruct << '\n';
 
   std::cout.flush();
   // Logger::log(Logger::Level::DEBUG, instruct, '\n');
@@ -96,10 +97,10 @@ int main(int argc, char* argv[])
     std::cout << instruct << '\n';
   */
 
-  Logger::debug("Code Gen started\n");
+  Logger::debug("Code Gen started");
   CodeGen code_gen(ir_instructs);
   auto cg_iss = std::istringstream(code_gen.gen_code());
-  Logger::debug("Code Gen finished\n");
+  Logger::debug("Code Gen finished");
   std::cout << std::flush;
 
   std::string asm_str;
@@ -118,10 +119,10 @@ int main(int argc, char* argv[])
     asm_str = cg_iss.str();
   auto iss = std::istringstream(asm_str);
 
-  Logger::debug("ASM:", '\n');
+  Logger::debug("ASM:");
   std::string line;
   while (std::getline(iss, line))
-    Logger::debug(line, '\n');
+    Logger::debug(line);
 
 
   std::ofstream outfile(output_file_path);

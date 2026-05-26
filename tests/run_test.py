@@ -16,7 +16,7 @@ def run():
 
     subprocess.run([args.assembler, "-g", "tmp.s", "-o", "tmp.o"], check=True)
 
-    subprocess.run([args.ld, "tmp.o", args.stdlib, "-o", "tmp.bin"], check=True)
+    subprocess.run([args.ld, "-g", "tmp.o", args.stdlib, "-o", "tmp.bin"], check=True)
 
     result = subprocess.run(["./tmp.bin"], capture_output=True, text=True)
     

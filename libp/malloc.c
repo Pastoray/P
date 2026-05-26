@@ -9,13 +9,10 @@ void* set_brk(const void* new_brk)
 {
   void* res;
   asm volatile (
-    "movq %1, %%rax\n\t"
-    "movq %2, %%rdi\n\t"
-    "syscall\n\t"
-    : "=r" (res)
-    : "r" ((long)SYS_BRK), "r" (new_brk)
-    : "rax", "rdi", "memory", "cc",
-      "rcx", "r11"
+    "syscall"
+    : "=a" (res)
+    : "a" ((long)SYS_BRK), "D" (new_brk)
+    : "memory", "cc", "rcx", "r11"
   );
   return res;
 }
@@ -34,15 +31,12 @@ void* sbrk(const int32_t inc)
 void* get_curr_brk(void)
 {
   void* res;
-
-  // Should never fail (we assume it doesn't)
   asm volatile (
-    "movq %1, %%rax\n\t"
     "movq $0, %%rdi\n\t"
-    "syscall\n\t"
-    "movq %%rax, %0\n\t"
-    : "=r" (res)
-    : "r" ((long)SYS_BRK)
+    "syscall"
+    : "=a" (res)
+    : "a" ((long)SYS_BRK)
+    : "rdi", "memory", "cc", "rcx", "r11"
   );
   return res;
 }
