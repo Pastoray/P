@@ -2,6 +2,7 @@
 #define PARSER_H
 
 #include <cstdint>
+#include <iomanip>
 #include <memory>
 #include <optional>
 #include <variant>
@@ -31,6 +32,7 @@ namespace Node
   struct Lit;
   struct Ident;
   struct Int;
+  struct Float;
   struct Call;
   struct ExprVisitor
   {
@@ -39,6 +41,7 @@ namespace Node
     virtual void visit(const BinExpr& bin_expr) = 0;
     virtual void visit(const Ident& ident) = 0;
     virtual void visit(const Int& int_) = 0;
+    virtual void visit(const Float& float_) = 0;
     virtual void visit(const Call& call) = 0;
   };
   struct Lit : Expr
@@ -97,6 +100,21 @@ namespace Node
       std::cout << std::string(ident, '\t') << "}\n";
     }
     int val;
+  };
+
+  struct Float : Lit
+  {
+    explicit Float(const float val) : val(val) {}
+    void accept(ExprVisitor& v) override { v.visit(*this); }
+    void dump(int ident) const override
+    {
+      auto old_prec = std::cout.precision();
+      std::cout << std::string(ident, '\t') << "Node::Float {\n";
+      std::cout << std::string(ident + 1, '\t') << "val: " << std::setprecision(9) << val << '\n';
+      std::cout << std::string(ident, '\t') << "}\n";
+      std::cout.precision(old_prec);
+    }
+    float val;
   };
 
   struct Ident : Lit
@@ -578,6 +596,7 @@ public:
   std::optional<Node::Func> parse_func();
 
   std::optional<Node::Int> parse_lit_int();
+  std::optional<Node::Float> parse_lit_float();
   std::optional<Node::Ident> parse_lit_ident();
   std::optional<std::shared_ptr<Node::Lit>> parse_lit();
   std::optional<std::shared_ptr<Node::Decl>> parse_decl();
