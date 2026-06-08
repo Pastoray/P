@@ -39,6 +39,7 @@
 
 #define LITERAL_LIST \
   OP(INT, "int") \
+  OP(FLOAT, "float") \
   OP(IDENT, "ident")
 
 #define KEYWORD_LIST \

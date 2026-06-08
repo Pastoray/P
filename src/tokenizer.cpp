@@ -18,10 +18,19 @@ std::vector<Token> Tokenizer::tokenize()
         buffer += m_src[m_index];
         consume();
       }
+      if (peek() && peek() == '.')
       {
-        tokens.emplace_back(TokenTypes::Literal::INT, buffer);
-      }
+        buffer += m_src[m_index];
+        consume();
+        while (peek().has_value() && std::isdigit(peek().value()))
+        {
+          buffer += m_src[m_index];
+          consume();
+        }
 
+        tokens.emplace_back(TokenTypes::Literal::FLOAT, buffer);
+      }
+      else tokens.emplace_back(TokenTypes::Literal::INT, buffer);
       buffer.clear();
     }
     else if (std::isalpha(peek().value()) || peek() == '_')
@@ -36,7 +45,9 @@ std::vector<Token> Tokenizer::tokenize()
       #define OP(name, str) if (buffer == str) { tokens.emplace_back(TokenTypes::Keyword::name); } else
       KEYWORD_LIST
       #undef OP
-      { tokens.emplace_back(TokenTypes::Literal::IDENT, buffer); }
+      if (buffer == "true") { tokens.emplace_back(TokenTypes::Literal::INT, "1"); }
+      else if (buffer == "false") { tokens.emplace_back(TokenTypes::Literal::INT, "0"); }
+      else { tokens.emplace_back(TokenTypes::Literal::IDENT, buffer); }
       buffer.clear();
       /*
       if (buffer == "return")
