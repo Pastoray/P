@@ -14,19 +14,14 @@ long write(int fd, const char* buf, long count)
 {
   int res;
   asm volatile (
-    "mov %1, %%rax\n\t"
-    "mov %2, %%rdi\n\t"
-    "mov %3, %%rsi\n\t"
-    "mov %4, %%rdx\n\t"
     "syscall\n\t"
     "mov %%eax, %0\n\t"
-    : "=r" (res)
-    : "r" ((long)SYS_WRITE),
-      "r" ((long)fd),
-      "r" (buf),
-      "r" (count)
-    : "rax", "rdi", "rsi", "rdx", "memory",
-      "rcx", "r11"
+    : "=a" (res)
+    : "a" ((long)SYS_WRITE),
+      "D" ((long)fd),
+      "S" (buf),
+      "d" (count)
+    : "rcx", "r11", "memory", "cc"
   );
   return res;
 }
@@ -79,6 +74,90 @@ void printi64(int64_t x)
 
   for (j--; j >= 0; j--)
     buf[i++] = temp[j];
+
+  buf[i++] = '\n';
+  buf[i] = '\0';
+  write(1, buf, i);
+}
+
+void printf32(float x)
+{
+  char buf[50];
+  if (x == 0)
+  {
+    write(1, "0.0\n", 4);
+    return;
+  }
+
+  int i = 0;
+  if (x < 0) buf[i++] = '-';
+
+  float val = (x < 0 ? -(float)x : (float)x);
+
+  uint64_t ival = (uint64_t)val;
+  int j = 0;
+  char temp[50];
+  for (; ival > 0; ival /= 10)
+    temp[j++] = (ival % 10) + '0';
+
+  for (j--; j >= 0; j--)
+    buf[i++] = temp[j];
+
+  if (i == 0) buf[i++] = '0';
+  buf[i++] = '.';
+
+  float fval = val - (uint64_t)val;
+  for (int k = 0; k < 6; k++)
+  {
+    fval *= 10;
+    int d = ((int)fval % 10);
+    buf[i++] = d + '0';
+    fval -= d;
+  }
+
+  if (buf[i - 1] == '.') buf[i++] = '0';
+
+  buf[i++] = '\n';
+  buf[i] = '\0';
+  write(1, buf, i);
+}
+
+void printf64(double x)
+{
+  char buf[50];
+  if (x == 0)
+  {
+    write(1, "0.0\n", 4);
+    return;
+  }
+
+  int i = 0;
+  if (x < 0) buf[i++] = '-';
+
+  double val = (x < 0 ? -(double)x : (double)x);
+
+  uint64_t ival = (uint64_t)val;
+  int j = 0;
+  char temp[50];
+  for (; ival > 0; ival /= 10)
+    temp[j++] = (ival % 10) + '0';
+
+  for (j--; j >= 0; j--)
+    buf[i++] = temp[j];
+
+  if (i == 0) buf[i++] = '0';
+  buf[i++] = '.';
+
+  double fval = val - (uint64_t)val;
+  for (int k = 0; k < 6; k++)
+  {
+    fval *= 10;
+    int d = ((int)fval % 10);
+    buf[i++] = d + '0';
+    fval -= d;
+  }
+
+  if (buf[i - 1] == '.') buf[i++] = '0';
 
   buf[i++] = '\n';
   buf[i] = '\0';
