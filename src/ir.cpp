@@ -33,6 +33,8 @@ void IRGen::Visitor::visit(const Node::Ident& ident) { m_gen.gen_ident(ident); }
 
 void IRGen::Visitor::visit(const Node::Int& int_) { m_gen.gen_int(int_); }
 
+void IRGen::Visitor::visit(const Node::Float& float_) { m_gen.gen_float(float_); };
+
 void IRGen::Visitor::visit(const Node::TypeRef& ref) { m_gen.gen_ref(ref); }
 
 void IRGen::Visitor::visit(const Node::TypeDef& def) { m_gen.gen_def(def); }
@@ -466,13 +468,14 @@ void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
 
         assert(std::holds_alternative<IR::Lit>(rhs_oper));
         auto off = std::get<IR::Lit>(rhs_oper);
+        assert(off.is_int());
 
         // assert(new_r.type.inner()->is_struct_t());
         if (auto* stc = std::get_if<Type::Struct>(&new_r.type.inner()->type))
         {
           std::string tmem;
           for (auto& [mem, os] : stc->body->offsets)
-            if (os == off.value)
+            if (os == off.as_int())
             {
               tmem = mem;
               break;
@@ -495,7 +498,7 @@ void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
         {
           std::string tmem;
           for (auto& [mem, os] : un->body->offsets)
-            if (os == off.value)
+            if (os == off.as_int())
             {
               tmem = mem;
               break;
@@ -547,7 +550,7 @@ void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
         {
           std::string tmem;
           for (auto& [mem, os] : stc->body->offsets)
-            if (os == off.value)
+            if (os == off.as_int())
             {
               tmem = mem;
               break;
@@ -570,7 +573,7 @@ void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
         {
           std::string tmem;
           for (auto& [mem, os] : un->body->offsets)
-            if (os == off.value)
+            if (os == off.as_int())
             {
               tmem = mem;
               break;
@@ -727,6 +730,11 @@ void IRGen::gen_ident(const Node::Ident& ident)
 void IRGen::gen_int(const Node::Int& int_)
 {
   m_stack.emplace(IR::Lit(int_.val, Type(Type::Base::I32)));
+}
+
+void IRGen::gen_float(const Node::Float& float_)
+{
+  m_stack.emplace(IR::Lit(float_.val, Type(Type::Base::F64)));
 }
 
 void IRGen::gen_ref(const Node::TypeRef& ref)
@@ -973,15 +981,24 @@ void IRGen::gen_call(const Node::Call& call)
 {
   auto sym = m_anl.sym_table.at(call.callable.id);
   assert(sym.is_fn());
+  auto ext = std::get<Sema::Symbol::FnExt>(sym.ext);
   IR::Reg ret_reg(sym.type);
   // IR::Reg ret_reg((Type(Type::Base::I32)));
   IR::Call ir_call(ret_reg);
   ir_call.callable = call.callable.name;
-  for (auto& expr : call.args)
+  for (int i = 0; i < call.args.size(); i++)
   {
+    auto& expr = call.args[i];
     expr->accept(m_visitor);
     auto top = m_stack.top();
     m_stack.pop();
+
+    if (IR::get_type(top) != ext.params[i].type)
+    {
+      coerce(top, ext.params[i].type);
+      top = m_stack.top();
+      m_stack.pop();
+    }
     ir_call.args.emplace_back(top);
   }
   m_stack.emplace(ret_reg);

@@ -16,12 +16,32 @@ namespace IR
   struct Lit
   {
     Type type;
-    int32_t value;
-    explicit Lit(const int32_t value, Type tp) : type(std::move(tp)), value(value) {}
+    std::variant<int32_t, double, std::string> value;
+    explicit Lit(const int32_t val, Type tp) : type(std::move(tp)), value(val) {}
+    explicit Lit(const double val, Type tp) : type(std::move(tp)), value(val) {}
+    explicit Lit(std::string val, Type tp) : type(std::move(tp)), value(std::move(val)) {}
+
+    bool is_int() const noexcept { return std::holds_alternative<int32_t>(value); }
+    bool is_float() const noexcept { return std::holds_alternative<double>(value); }
+    bool is_str() const noexcept { return std::holds_alternative<std::string>(value); }
+
+    int32_t as_int() const { return std::get<int32_t>(value); }
+    double as_float() const { return std::get<double>(value); }
+    const std::string& as_str() const { return std::get<std::string>(value); }
 
     bool operator<(const Lit& other) const noexcept { return value < other.value; }
     bool operator==(const Lit& other) const noexcept { return value == other.value; }
-    inline friend std::ostream& operator<<(std::ostream& os, const Lit& lit) { os << lit.value; return os; }
+    inline friend std::ostream& operator<<(std::ostream& os, const Lit& lit)
+    {
+      std::visit([&os](const auto& val)
+        {
+          auto old_prec = os.precision();
+          os << std::setprecision(9) << val;
+          os.precision(old_prec);
+        }, lit.value
+      );
+      return os;
+    }
   };
 
   struct Reg
@@ -359,6 +379,18 @@ namespace IR
       if (frm.type == to.type)
         return CastOp::BITCAST;
 
+      if (frm.is_float())
+      {
+        if (frm.size() < to.size()) return CastOp::FPEXT;
+        else return CastOp::FPTRUNC;
+
+        if (to.is_int())
+        {
+          return CastOp::FP2SI;
+        }
+        return CastOp::BITCAST;
+      }
+
       if (frm.size() == to.size() && frm.is_int() && to.is_int()) return CastOp::BITCAST;
       if (frm.is_int() && to.is_int())
       {
@@ -492,6 +524,7 @@ class IRGen
     // void visit(const Node::MemberExpr&) override;
     void visit(const Node::Ident&) override;
     void visit(const Node::Int&) override;
+    void visit(const Node::Float&) override;
     void visit(const Node::Call&) override;
 
     void visit(const Node::TypeRef&) override;
@@ -519,6 +552,7 @@ private:
   // void gen_mem_expr(const Node::MemberExpr&);
   void gen_ident(const Node::Ident&);
   void gen_int(const Node::Int&);
+  void gen_float(const Node::Float&);
   // void gen_member(const Node::Member& mem);
   void gen_asgn(const Node::Asgn&);
 
