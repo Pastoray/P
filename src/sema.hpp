@@ -145,6 +145,7 @@ public:
   ExprInfo analyze_un_expr(const Node::UnExpr&);
   ExprInfo analyze_ident(const Node::Ident&);
   ExprInfo analyze_int(const Node::Int&);
+  ExprInfo analyze_float(const Node::Float&);
   ExprInfo analyze_call(const Node::Call&);
 
   void analyze_asgn(const Node::Asgn&);

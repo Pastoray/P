@@ -237,10 +237,17 @@ Sema::ExprInfo Sema::analyze_int(const Node::Int& int_)
   return ExprInfo(Type(Type::Base::I32), ValCat::RVALUE);
 }
 
+Sema::ExprInfo Sema::analyze_float(const Node::Float& float_)
+{
+  return ExprInfo(Type(Type::Base::F64), ValCat::RVALUE);
+}
+
 Sema::ExprInfo Sema::analyze_lit(const std::shared_ptr<Node::Lit>& lit)
 {
   if (auto int_ = std::dynamic_pointer_cast<Node::Int>(lit))
     return analyze_int(*int_);
+  if (auto float_ = std::dynamic_pointer_cast<Node::Float>(lit))
+    return analyze_float(*float_);
   else if (auto ident = std::dynamic_pointer_cast<Node::Ident>(lit))
     return analyze_ident(*ident);
   Utils::panic("Unexpected analyze literal");
@@ -577,7 +584,8 @@ void Sema::analyze_struct(const Node::Struct& strct)
           );
           return def.res_t;
         },
-        [&](const Node::TypeRef& ref) -> std::shared_ptr<Type> { return ref.res_t; }
+        [&](const Node::TypeRef& ref) -> std::shared_ptr<Type>
+        { return ref.res_t; }
       }, type
     );
     // type = Node::TypeRef(res_tp);
@@ -638,6 +646,13 @@ void Sema::analyze_struct(const Node::Struct& strct)
     resolve_type(resolve_type, *tp);
     st.insert_mem(tp, member.name);
   }
+  st.finish();
+
+  auto& symt = get_curr_scope()->m_sym_table.at(strct.id.name);
+  std::get<Type::Struct>(symt.type.type).size = st.size;
+
+  auto& gsymt = g_anl.sym_table.at(strct.id.id);
+  std::get<Type::Struct>(gsymt.type.type).size = st.size;
 
   for (auto& [type, field] : strct.members)
   {
@@ -727,6 +742,13 @@ void Sema::analyze_union(const Node::Union& un)
     );
     */
   }
+  unt.finish();
+
+  auto& symt = get_curr_scope()->m_sym_table.at(un.id.name);
+  std::get<Type::Union>(symt.type.type).size = unt.size;
+
+  auto& gsymt = g_anl.sym_table.at(un.id.id);
+  std::get<Type::Union>(gsymt.type.type).size = unt.size;
 
   for (auto& [type, field] : un.members)
   {
