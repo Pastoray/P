@@ -52,4 +52,6 @@ add_e2e_test(struct "struct.p" "100")
 add_e2e_test(union "union.p" "42\n1000000\n1000000\n555\n555\n-1")
 add_e2e_test(enum "enum.p" "1\n403\n404\n100")
 add_e2e_test(malloc "malloc.p" "16\n64")
+add_e2e_test(float "float.p" "3.140000\n3.141500\n6.281500\n6.698500\n67.000000")
+add_e2e_test(structfp "structfp.p" "6.900000\n121202.674099")
 
