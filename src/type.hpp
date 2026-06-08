@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstdint>
 #include <numeric>
 #include <string>
 #include <memory>
@@ -33,7 +34,7 @@ struct Type
   };
   struct Struct
   {
-    explicit Struct(std::string name) : name(std::move(name)), body(std::make_shared<Body>()) {}
+    explicit Struct(std::string name) : name(std::move(name)), body(std::make_shared<Body>()), size(0) {}
     std::string name;
     struct Body
     {
@@ -42,24 +43,45 @@ struct Type
     };
 
     std::shared_ptr<Body> body;
-    bool operator==(const Struct& other) const { return name == other.name; };
+    size_t size;
 
+    bool operator==(const Struct& other) const { return name == other.name; };
     void insert_mem(std::shared_ptr<Type> tp, const std::string& mem)
     {
       assert(!body->offsets.count(mem) && "Duplicated member");
+      size_t align = size % tp->alignment();
+      if (align != 0)
+        size += tp->alignment() - align;
+
+      /*
       size_t cur_off = std::accumulate(
         body->types.begin(), body->types.end(), 0LL,
         [&](long long off, const std::pair<std::string, std::shared_ptr<Type>>& p)
         { return off + p.second->size(); }
       );
-      body->offsets[mem] = cur_off;
+      */
+      
+      body->offsets[mem] = size;
       body->types.try_emplace(mem, tp);
+      size += tp->size();
+    }
+
+    void finish()
+    {
+      auto max_mem = std::max_element(
+        body->types.begin(), body->types.end(),
+        [&](const auto& a, const auto& b) { return a.second->alignment() < b.second->alignment(); }
+      );
+
+      size_t align = size % max_mem->second->alignment();
+      if (align != 0)
+        size += max_mem->second->alignment() - align;
     }
   };
 
   struct Union
   {
-    explicit Union(std::string name) : name(std::move(name)), body(std::make_shared<Body>()) {}
+    explicit Union(std::string name) : name(std::move(name)), body(std::make_shared<Body>()), size(0) {}
     std::string name;
     struct Body
     {
@@ -68,13 +90,28 @@ struct Type
     };
 
     std::shared_ptr<Body> body;
-    bool operator==(const Union& other) const { return name == other.name; };
+    size_t size;
 
+    bool operator==(const Union& other) const { return name == other.name; };
     void insert_mem(std::shared_ptr<Type> tp, const std::string& mem)
     {
       assert(!body->offsets.count(mem) && "Duplicated member");
       body->offsets[mem] = 0;
       body->types.try_emplace(mem, tp);
+
+      size = std::max(size, tp->size());
+    }
+
+    void finish()
+    {
+      auto max_mem = std::max_element(
+        body->types.begin(), body->types.end(),
+        [&](const auto& a, const auto& b) { return a.second->alignment() < b.second->alignment(); }
+      );
+
+      size_t align = size % max_mem->second->alignment();
+      if (align != 0)
+        size += max_mem->second->alignment() - align;
     }
   };
 
@@ -165,7 +202,8 @@ struct Type
       return *bt == Base::F32 || *bt == Base::F64;
     return false;
   }
-   bool operator==(const Type& other) const { return type == other.type; }
+  bool operator==(const Type& other) const { return type == other.type; }
+  bool operator!=(const Type& other) const { return !(type == other.type); }
   [[nodiscard]] size_t size() const
   {
     return std::visit(
@@ -212,23 +250,78 @@ struct Type
         },
         [](const Struct& st) -> size_t
         {
+          return st.size;
+          /*
           size_t tot = std::accumulate(
             st.body->types.begin(), st.body->types.end(), 0LL,
             [&](long long off, const std::pair<std::string, std::shared_ptr<Type>>& p) { return off + p.second->size(); }
           );
           return tot;
+          auto it = std::max_element(
+            st.body->offsets.begin(), st.body->offsets.end(),
+            [&](const auto& a, const auto& b) { return a.second < b.second; }
+          );
+          return it->second + st.body->types.at(it->first)->size();
+          */
         },
         [](const Union& un) -> size_t
         {
+          return un.size;
+          /*
+          if (un.body->types.empty()) return 0;
           auto it = std::max_element(
             un.body->types.begin(), un.body->types.end(),
             [&](const auto& a, const auto& b) { return a.second->size() < b.second->size(); }
           );
           return it->second->size();
+          */
         },
         [](const Enum& en) -> size_t
         {
           return 4;
+        },
+      }, type
+    );
+  }
+
+  [[nodiscard]] size_t alignment() const
+  {
+    return std::visit(
+      Utils::overloaded
+      {
+        [this](const Base& bt) -> size_t
+        {
+          return size();
+        },
+        [this](const Ptr& t) -> size_t
+        {
+          return size();
+        },
+        [this](const Arr& t) -> size_t
+        {
+          return t.of->alignment();
+        },
+        [](const Struct& st) -> size_t
+        {
+          if (st.body->types.empty()) return 1;
+          auto it = std::max_element(
+            st.body->types.begin(), st.body->types.end(),
+            [&](const auto& a, const auto& b) { return a.second->size() < b.second->size(); }
+          );
+          return it->second->alignment();
+        },
+        [](const Union& un) -> size_t
+        {
+          if (un.body->types.empty()) return 1;
+          auto it = std::max_element(
+            un.body->types.begin(), un.body->types.end(),
+            [&](const auto& a, const auto& b) { return a.second->size() < b.second->size(); }
+          );
+          return it->second->alignment();
+        },
+        [this](const Enum& en) -> size_t
+        {
+          return size();
         },
       }, type
     );
