@@ -1,10 +1,11 @@
 #include "codegen.hpp"
 #include "ir.hpp"
+#include "utils.hpp"
 #include <cassert>
 #include <variant>
 
 CodeGen::CodeGen(std::vector<IR::Instruct>& instructs)
-      : m_instructs(std::move(instructs)), m_rbpoff(0), m_reg_offset({}) { precomp_stack_size(IR::Label::create_code("_global"), m_instructs); }
+      : m_instructs(std::move(instructs)), m_rbpoff(-16), m_reg_offset({}) { precomp_stack_size(IR::Label::create_code("_global"), m_instructs); }
 
 void CodeGen::precomp_stack_size(const IR::Label& l, const std::vector<IR::Instruct>& inst)
 {
@@ -20,11 +21,12 @@ void CodeGen::precomp_stack_size(const IR::Label& l, const std::vector<IR::Instr
   m_ln_to_rsz.try_emplace(l.name, sz);
 }
 
-int32_t CodeGen::reg_offset(IR::Reg& reg)
+int32_t CodeGen::reg_offset(const IR::Reg& reg)
 {
   if (m_reg_offset.find(reg) == m_reg_offset.end())
   {
     // m_rbpoff -= (int32_t)reg.reserve;
+    std::cout << reg.type << ": " << reg.type.size() << std::endl;
     m_rbpoff -= reg.type.size();
     m_reg_offset[reg] = m_rbpoff;
   }
@@ -123,6 +125,22 @@ void CodeGen::MOV(OperandPtr lhs, OperandPtr rhs)
   auto arhs = prepare_dest(rhs);
   m_text << "# prepare (end)\n\t";
 
+  bool lhsf = std::holds_alternative<Reg::FPR>(alhs.base_reg);
+  bool rhsf = std::holds_alternative<Reg::FPR>(arhs.base_reg);
+
+  if (lhsf && rhsf || lhsf && arhs.indirect)
+  {
+    if (arhs.size() == 8) m_text << "movsd" << " " << alhs << ", " << arhs << "\n\t";
+    else m_text << "movss" << " " << alhs << ", " << arhs << "\n\t";
+    return;
+  }
+  else if (lhsf || rhsf)
+  {
+    if (alhs.size() == 4) m_text << "movd" << " " << alhs << ", " << arhs << "\n\t";
+    else m_text << "movq" << " " << alhs << ", " << arhs << "\n\t";
+    return;
+  }
+
   // promote(alhs, arhs);
   auto suf = sfx(arhs.size());
   if (alhs.indirect && arhs.indirect)
@@ -131,7 +149,7 @@ void CodeGen::MOV(OperandPtr lhs, OperandPtr rhs)
     // required for *x = y;
     
     // m_text << "# EVIL MOV (" << alhs.size() << ", " << arhs.size() << ")\n\t";
-    RegGuard tmp(pool, pool.alloc_any(arhs.size()));
+    RegGuard tmp(pool, pool.alloc_any_gpr(arhs.size()));
     m_text << "mov" << suf << " " << alhs << ", " << tmp << "\n\t";
     m_text << "mov" << suf << " " << tmp << ", " << arhs << "\n\t";
     return;
@@ -159,6 +177,19 @@ void CodeGen::ADD(OperandPtr lhs, OperandPtr rhs, OperandPtr dest)
   auto alhs = prepare_oper(lhs);
   auto arhs = prepare_oper(rhs);
 
+  bool lhsf = std::holds_alternative<Reg::FPR>(alhs.base_reg);
+  bool rhsf = std::holds_alternative<Reg::FPR>(arhs.base_reg);
+
+  if (lhsf && rhsf)
+  {
+    auto suf = sfx(dest);
+    if (suf == Suffix::Q) m_text << "addsd" << " " << arhs << ", " << alhs << "\n\t";
+    else if (suf == Suffix::L) m_text << "addss" << " " << arhs << ", " << alhs << "\n\t";
+    else assert(false);
+    MOV(&alhs, dest);
+    return;
+  }
+
   // uint32_t com_sz = coerce_common(alhs, arhs);
   // auto suf = sfx(com_sz);
   auto suf = sfx(dest);
@@ -175,6 +206,19 @@ void CodeGen::SUB(OperandPtr lhs, OperandPtr rhs, OperandPtr dest)
   m_text << "# prepare (start)\n\t";
   auto alhs = prepare_oper(lhs);
   auto arhs = prepare_oper(rhs);
+
+  bool lhsf = std::holds_alternative<Reg::FPR>(alhs.base_reg);
+  bool rhsf = std::holds_alternative<Reg::FPR>(arhs.base_reg);
+
+  if (lhsf && rhsf)
+  {
+    auto suf = sfx(dest);
+    if (suf == Suffix::Q) m_text << "subsd" << " " << arhs << ", " << alhs << "\n\t";
+    else if (suf == Suffix::L) m_text << "subss" << " " << arhs << ", " << alhs << "\n\t";
+    else assert(false);
+    MOV(&alhs, dest);
+    return;
+  }
 
   // auto com_sz = coerce_common(alhs, arhs);
   // auto suf = sfx(com_sz);
@@ -307,7 +351,9 @@ void CodeGen::DIV(OperandPtr lhs, OperandPtr rhs, OperandPtr dest)
 
   m_text << "pushq " << rax64 << "\n\t";
   m_text << "pushq " << rdx64 << "\n\t";
-  m_text << "pushq " << to64(arhs.base_reg) << "\n\t";
+
+  assert(std::holds_alternative<Reg::GPR>(arhs.base_reg));
+  m_text << "pushq " << to64(std::get<Reg::GPR>(arhs.base_reg)) << "\n\t";
   
   m_text << "mov" << suf << " " << alhs << ", " << rax << "\n\t";
   m_text << "xor" << suf << " " << rdx << ", " << rdx << "\n\t";
@@ -344,8 +390,10 @@ void CodeGen::SETCC(const std::string& set_op, OperandPtr lhs, OperandPtr rhs, O
 
   CMP(&alhs, &arhs);
 
-  m_text << set_op << " " << to8(alhs.base_reg) << "\n\t";
-  m_text << "movzb" << suf << " " << to8(alhs.base_reg) << ", " << alhs << "\n\t";
+  assert(std::holds_alternative<Reg::GPR>(alhs.base_reg));
+  auto reg = std::get<Reg::GPR>(alhs.base_reg);
+  m_text << set_op << " " << to8(reg) << "\n\t";
+  m_text << "movzb" << suf << " " << to8(reg) << ", " << alhs << "\n\t";
 
   MOV(&alhs, dest);
   m_text << "\n\t";
@@ -391,14 +439,23 @@ void CodeGen::IMPC(OperandPtr dest, OperandPtr val, IR::ImpCast::CastOp op)
   auto adest = prepare_dest(dest);
   auto aval = prepare_oper(val);
   m_text << "# prepare (end)\n\t";
-  auto tmp = pool.alloc_any(adest.type.inner()->size());
+  auto unlock_reg = [&](const auto& reg) { pool.unlock(reg); };
+  std::variant<Reg::GPR, Reg::FPR> tmp;
+  if (adest.type.inner()->is_float())
+    tmp = pool.alloc_any_fpr(adest.type.inner()->size());
+  else
+    tmp = pool.alloc_any_gpr(adest.type.inner()->size());
   auto poper = PreOper(*adest.type.inner(), tmp, false, 0, false, nullptr);
 
   if (aval.type.size() == adest.type.inner()->size())
   {
     m_text << "# CAST SAME SIZE (NOOP)\n\t";
-    m_text << "mov" << sfx(&adest) << " " << aval << ", " << adest << "\n\t";
-    pool.unlock(tmp);
+    if (aval.type.is_float())
+      m_text << "mov" << (adest.type.inner()->size() == 4 ? "ss" : "sd") << " " << aval << ", " << adest << "\n\t";
+    else
+      m_text << "mov" << sfx(&adest) << " " << aval << ", " << adest << "\n\t";
+    std::visit(unlock_reg, tmp);
+    // pool.unlock(tmp);
     return;
   }
   switch (op)
@@ -409,7 +466,11 @@ void CodeGen::IMPC(OperandPtr dest, OperandPtr val, IR::ImpCast::CastOp op)
         if (adest.indirect)
           m_text << "movl " << aval << ", " << adest << "\n\t";
         else
-          m_text << "movl " << aval << ", " << Reg::to32(adest.base_reg) << "\n\t";
+        {
+          assert(std::holds_alternative<Reg::GPR>(adest.base_reg));
+          auto reg = std::get<Reg::GPR>(adest.base_reg);
+          m_text << "movl " << aval << ", " << Reg::to32(reg) << "\n\t";
+        }
       }
       else
       {
@@ -422,15 +483,71 @@ void CodeGen::IMPC(OperandPtr dest, OperandPtr val, IR::ImpCast::CastOp op)
       m_text << "mov" << sfx(&adest) << " " << poper << ", " << adest << "\n\t";
       break;
     case (IR::ImpCast::CastOp::TRUNC):
-      m_text << "mov" << sfx(&adest) << " " << Reg::as_sz(aval.base_reg, adest.type.inner()->size()) << ", " << adest << "\n\t";
+      {
+        assert(std::holds_alternative<Reg::GPR>(aval.base_reg));
+        auto reg = std::get<Reg::GPR>(aval.base_reg);
+        m_text << "mov" << sfx(&adest) << " " << Reg::as_sz(reg, adest.type.inner()->size()) << ", " << adest << "\n\t";
+      }
       break;
-    case (IR::ImpCast::CastOp::SI2FP):
-    case (IR::ImpCast::CastOp::UI2FP):
-    case (IR::ImpCast::CastOp::FP2SI):
-    case (IR::ImpCast::CastOp::FP2UI):
-    case (IR::ImpCast::CastOp::FPEXT):
-    case (IR::ImpCast::CastOp::FPTRUNC):
+
+      /*
       Logger::warn("NYI ImpCast");
+      break;
+      */
+    case (IR::ImpCast::CastOp::SI2FP):
+      {
+        auto tmp = pool.alloc_any_fpr(8);
+        auto poper = PreOper(Type(Type::Base::F64), tmp, false, 0, false, nullptr);
+        m_text << "cvtsi2sd" << " " << aval << ", " << poper << "\n\t";
+        m_text << "movsd" << " " << poper << ", " << adest << "\n\t";
+        pool.unlock(tmp);
+      }
+      break;
+    case (IR::ImpCast::CastOp::UI2FP):
+      {
+        auto tmp = pool.alloc_any_fpr(8);
+        auto poper = PreOper(Type(Type::Base::F64), tmp, false, 0, false, nullptr);
+        m_text << "cvtusi2sd" << " " << aval << ", " << poper << "\n\t";
+        m_text << "movsd" << " " << poper << ", " << adest << "\n\t";
+        pool.unlock(tmp);
+      }
+      break;
+    case (IR::ImpCast::CastOp::FP2SI):
+      {
+        auto tmp = pool.alloc_any_gpr(8);
+        auto poper = PreOper(Type(Type::Base::I64), tmp, false, 0, false, nullptr);
+        m_text << "cvttsd2si" << " " << aval << ", " << poper << "\n\t";
+        m_text << "movq" << " " << poper << ", " << adest << "\n\t";
+        pool.unlock(tmp);
+      }
+      break;
+    case (IR::ImpCast::CastOp::FP2UI):
+      {
+        auto tmp = pool.alloc_any_gpr(8);
+        auto poper = PreOper(Type(Type::Base::U64), tmp, false, 0, false, nullptr);
+        m_text << "vcvttsd2usi" << " " << aval << ", " << poper << "\n\t";
+        m_text << "movq" << " " << poper << ", " << adest << "\n\t";
+        pool.unlock(tmp);
+      }
+      break;
+    case (IR::ImpCast::CastOp::FPEXT):
+      {
+        auto tmp = pool.alloc_any_fpr(8);
+        auto poper = PreOper(Type(Type::Base::F64), tmp, false, 0, false, nullptr);
+        m_text << "cvtss2sd" << " " << aval << ", " << poper << "\n\t";
+        m_text << "movsd" << " " << poper << ", " << adest << "\n\t";
+        pool.unlock(tmp);
+        // m_text << "cvtss2sd" << " " << aval << ", " << adest << "\n\t";
+      }
+      break;
+    case (IR::ImpCast::CastOp::FPTRUNC):
+      {
+        auto tmp = pool.alloc_any_fpr(8);
+        auto poper = PreOper(Type(Type::Base::F32), tmp, false, 0, false, nullptr);
+        m_text << "cvtsd2ss" << " " << aval << ", " << poper << "\n\t";
+        m_text << "movss" << " " << poper << ", " << adest << "\n\t";
+        pool.unlock(tmp);
+      }
       break;
     case (IR::ImpCast::CastOp::BITCAST):
       m_text << "mov" << sfx(&adest) << " " << aval << ", " << adest << "\n\t";
@@ -439,19 +556,20 @@ void CodeGen::IMPC(OperandPtr dest, OperandPtr val, IR::ImpCast::CastOp op)
   }
   m_text << "# cast (end)\n\t";
   m_text << "\n\t";
-  pool.unlock(tmp);
+  std::visit(unlock_reg, tmp);
+  // pool.unlock(tmp);
 }
 
 void CodeGen::gen_alloca(IR::Alloca& alc)
 {
   {
-    auto tmp = pool.alloc_any(8);
+    auto tmp = pool.alloc_any_gpr(8);
     // auto tp = Type(Type::Ptr(std::make_shared<Type>(Type::Base::I64)));
     // auto poper = PreOper(tp, tmp, true, 0, false, &pool);
     auto poper = PreOper(Type(Type::Base::I64), tmp, false, 0, false, &pool);
     auto val = IR::Operand(IR::Lit(4, Type(Type::Base::I64)));
     MOV(&val, &poper);
-    auto dtmp = pool.alloc_any(8);
+    auto dtmp = pool.alloc_any_gpr(8);
 
     // only reason this works is sizeof(ptr) == sizeof(i64)
     auto tp = Type(Type::Ptr(std::make_shared<Type>(Type::Base::I64)));
@@ -483,6 +601,7 @@ void CodeGen::gen_impc(IR::ImpCast& impc)
 
 std::string CodeGen::gen_code()
 {
+  m_rodata << "\n.section .rodata\n\t";
   m_data << "\n.section .data\n\t";
   m_bss << "\n.section .bss\n\t";
   m_text << "\n.section .text\n\t";
@@ -498,7 +617,7 @@ std::string CodeGen::gen_code()
 
   m_text << "call main\n\t";
   m_text << "movl $60, %eax\n\t" << "movl $0, %edi\n\t" << "syscall\n";
-  return m_bss.str() + m_data.str() + m_text.str();
+  return m_rodata.str() + m_data.str() + m_bss.str() + m_text.str();
 }
 
 void CodeGen::gen_instr(IR::Instruct& instr)
@@ -608,8 +727,7 @@ PreOper CodeGen::prepare_dest(IR::Operand* oper)
     {
       // auto tmp = gen.pool.alloc(8);
       auto tmp = Reg::GPR::R10;
-      // This doesn't work for (jmp, jne, je) label(%rip)
-      gen.m_text << "lea" << Suffix::Q << " " << gen.format_operand(l) << "(%rip), " << tmp << "\n\t";
+      gen.m_text << "lea" << Suffix::Q << " " << gen.format_operand(l) << ", " << tmp << "\n\t";
       auto dest_t = Type(Type::Ptr(std::make_shared<Type>(l.type)));
       return PreOper(dest_t, tmp, true, 0, false, &gen.pool);
       // return PreOper(tmp, true, 0, true, &gen.pool, l.size, 8);
@@ -627,7 +745,14 @@ PreOper CodeGen::prepare_oper(IR::Operand* oper)
     {
       // Suffix suf = sfx(lit.size);
       auto suf = sfx(lit.type.size());
-      auto tmp = gen.pool.alloc_any(lit.type.size());
+      if (lit.type.is_float())
+      {
+        auto tmp = gen.pool.alloc_any_fpr(lit.type.size());
+        if (lit.type.size() == 4) gen.m_text << "movss" << " " << gen.format_operand(lit) << ", " << tmp << "\n\t";
+        if (lit.type.size() == 8) gen.m_text << "movsd" << " " << gen.format_operand(lit) << ", " << tmp << "\n\t";
+        return PreOper(lit.type, tmp, false, 0, true, &gen.pool);
+      }
+      auto tmp = gen.pool.alloc_any_gpr(lit.type.size());
       gen.m_text << "mov" << suf << " " << gen.format_operand(lit) << ", " << tmp << "\n\t";
       return PreOper(lit.type, tmp, false, 0, true, &gen.pool);
       // return PreOper(tmp, false, 0, true, &gen.pool, lit.size, lit.size);
@@ -635,16 +760,28 @@ PreOper CodeGen::prepare_oper(IR::Operand* oper)
     PreOper operator()(IR::Reg& reg)
     {
       Suffix suf = sfx(reg.type.size());
+      if (reg.type.is_float())
+      {
+        auto tmp = gen.pool.alloc_any_fpr(reg.type.size());
+        // gen.m_text << "movsd" << " " << gen.format_operand(reg) << ", " << tmp << "\n\t";
+        if (reg.type.size() == 4) gen.m_text << "movss" << " " << gen.format_operand(reg) << ", " << tmp << "\n\t";
+        if (reg.type.size() == 8) gen.m_text << "movsd" << " " << gen.format_operand(reg) << ", " << tmp << "\n\t";
+        return PreOper(reg.type, tmp, false, 0, true, &gen.pool);
+      }
       // gen.m_text << "# 1. SUF (" << suf << "), " << "OSIZE (" << reg.osize << "), " << "SIZE (" << reg.size << ").\n\t";
-      auto tmp = gen.pool.alloc_any(reg.type.size());
+      auto tmp = gen.pool.alloc_any_gpr(reg.type.size());
       gen.m_text << "mov" << suf << " " << gen.format_operand(reg) << ", " << tmp << "\n\t";
       return PreOper(reg.type, tmp, false, 0, true, &gen.pool);
     }
     PreOper operator()(IR::Mem& mem)
     {
       gen.m_text << "# mem (oper) (start)\n\t";
+      std::variant<Reg::GPR, Reg::FPR> tmp1;
+      if (mem.type.is_float())
+        tmp1 = gen.pool.alloc_any_fpr(mem.type.size());
+      else
+        tmp1 = gen.pool.alloc_any_gpr(mem.type.size());
       Suffix suf = sfx(mem.type.size());
-      auto tmp1 = gen.pool.alloc_any(mem.type.size());
       RegGuard tmp2(gen.pool, 8);
       RegGuard tmp3(gen.pool, 8);
 
@@ -674,7 +811,19 @@ PreOper CodeGen::prepare_oper(IR::Operand* oper)
       if (mem.index) ss << ", " << tmp3;
       if (mem.scale) ss << ", " << *mem.scale;
 
-      gen.m_text << "mov" << suf << " (" << ss.str() << "), " << tmp1 << "\n\t";
+      auto print_reg = [&](const auto& reg) { gen.m_text << reg; };
+      if (mem.type.is_float())
+      {
+        if (mem.type.size() == 4) gen.m_text << "movss";
+        if (mem.type.size() == 8) gen.m_text << "movsd";
+        // gen.m_text << "movsd";
+      }
+      else
+        gen.m_text << "mov" << suf;
+
+      gen.m_text << " (" << ss.str() << "), ";
+      std::visit(print_reg, tmp1);
+      gen.m_text << "\n\t";
       auto ret = PreOper(mem.type, tmp1, false, 0, true, &gen.pool);
       gen.m_text << "# mem (oper) (end)\n\t";
       return ret;
@@ -683,8 +832,25 @@ PreOper CodeGen::prepare_oper(IR::Operand* oper)
     PreOper operator()(IR::Label& l)
     {
       Suffix suf = sfx(l.type.size());
-      auto tmp = gen.pool.alloc_any(l.type.size());
-      gen.m_text << "mov" << suf << " " << gen.format_operand(l) << ", " << tmp << "\n\t";
+      std::variant<Reg::GPR, Reg::FPR> tmp;
+      if (l.type.is_float())
+        tmp = gen.pool.alloc_any_fpr(l.type.size());
+      else
+        tmp = gen.pool.alloc_any_gpr(l.type.size());
+      // auto tmp = gen.pool.alloc_any_gpr(l.type.size());
+      if (l.type.is_float())
+      {
+        if (l.type.size() == 4) gen.m_text << "movss";
+        if (l.type.size() == 8) gen.m_text << "movsd";
+        // gen.m_text << "movsd";
+      }
+      else
+        gen.m_text << "mov" << suf;
+
+      auto print_reg = [&](const auto& reg) { gen.m_text << reg; };
+      gen.m_text << " " << gen.format_operand(l) << ", ";
+      std::visit(print_reg, tmp);
+      gen.m_text << "\n\t";
       return PreOper(l.type, tmp, false, 0, true, &gen.pool);
     }
   };
@@ -695,6 +861,8 @@ void CodeGen::gen_gstore(IR::GStore& gstore)
 {
   // change to actual size
   m_bss << gstore.dest.name << ": .space " << gstore.dest.type.size() << "\n\t";
+  auto store = IR::Store(IR::Operand(gstore.dest), gstore.val);
+  gen_store(store);
 }
 
 void CodeGen::gen_store(IR::Store& store)
@@ -713,8 +881,12 @@ void CodeGen::gen_binop(IR::Binop& binop)
 {
   m_text << "# binop (start)" << "\n\t";
 
-  for (auto& [reg, cnt] : pool.usage)
+  for (auto& [reg, cnt] : pool.gpr_usage)
     assert(cnt == 0 && "Detected register leak");
+
+  for (auto& [reg, cnt] : pool.fpr_usage)
+    assert(cnt == 0 && "Detected register leak");
+
   // assert(pool.available.size() == 5 && "Detected register leak");
   switch (binop.op)
   {
@@ -885,7 +1057,7 @@ void CodeGen::ADDR_OF(OperandPtr src, OperandPtr dest)
   // This is necessary because prepare_dest hardcodes R10
   // if we call another prepare_dest without saving this one
   // we would be modifying the content of this
-  auto tmp = pool.alloc_any(8);
+  auto tmp = pool.alloc_any_gpr(8);
   auto poper = PreOper(asrc.type, tmp, false, 0, true, &pool);
 
   m_text << "movq " << asrc << ", " << poper << "\n\t";
@@ -897,7 +1069,7 @@ void CodeGen::DEREF(OperandPtr src, OperandPtr dest)
   auto asrc = prepare_oper(src);
   asrc.indirect = true;
 
-  auto tmp = pool.alloc_any(8);
+  auto tmp = pool.alloc_any_gpr(8);
   auto poper = PreOper(*asrc.type.inner(), tmp, false, 0, true, &pool);
 
   m_text << "mov" << sfx(asrc.type.inner()->size()) << " " << asrc << ", " << poper << "\n\t";
@@ -1026,7 +1198,7 @@ void CodeGen::gen_label(IR::Label& label)
 void CodeGen::gen_fn(IR::Func& fn)
 {
   int prev_rbp = m_rbpoff;
-  m_rbpoff = 0;
+  m_rbpoff = -16;
   gen_label(fn.label);
   m_text << "pushq %rbp\n\t";
   m_text << "movq %rsp, %rbp\n\t";
@@ -1044,152 +1216,429 @@ void CodeGen::gen_fn(IR::Func& fn)
 
 void CodeGen::gen_params(std::vector<IR::Param>& params)
 {
-  std::vector<Reg::GPR> param_regs = { Reg::GPR::EDI, Reg::GPR::ESI, Reg::GPR::EDX, Reg::GPR::ECX, Reg::GPR::R8D, Reg::GPR::R9D };
-  // assert(params.size() <= param_regs.size());
-  if (params.empty())
-    return;
+  std::vector<Reg::GPR> gp_regs = {
+    Reg::GPR::RDI, Reg::GPR::RSI, Reg::GPR::RDX, Reg::GPR::RCX, Reg::GPR::R8, Reg::GPR::R9
+  };
+  std::vector<Reg::FPR> fp_regs = {
+    Reg::FPR::XMM0, Reg::FPR::XMM1, Reg::FPR::XMM2, Reg::FPR::XMM3,
+    Reg::FPR::XMM4, Reg::FPR::XMM5, Reg::FPR::XMM6, Reg::FPR::XMM7
+  };
 
-  int len = std::min(param_regs.size(), params.size());
-  for (int i = 0; i < len; i++)
+  int j = 0, k = 0;
+  auto ctz_int = [&](auto&& self, const Type& tp, int cur, int from, int to) -> bool
   {
-    if (pool.usage.count(param_regs[i])) pool.lock(param_regs[i]);
-    auto poper = PreOper(params[i].reg.type, param_regs[i], false, 0, false, nullptr);
-    IR::Operand oper = params[i].reg; 
-    m_text << "# SMOVING PARAM\n\t";
-    MOV(&poper, &oper);
-    m_text << "# EMOVING PARAM\n\t";
+    if (tp.is_int() || tp.is_ptr_t()) return cur >= from && cur <= to; 
+    if (auto st = std::get_if<Type::Struct>(&tp.type))
+    {
+      for (auto& [field, off] : st->body->offsets)
+        if (cur + off >= from && cur + off <= to)
+          if (self(self, *st->body->types.at(field), cur + off, from, to)) return true;
+    }
+    if (auto un = std::get_if<Type::Union>(&tp.type))
+    {
+      for (auto& [field, off] : un->body->offsets)
+        if (cur + off >= from && cur + off <= to)
+          if (self(self, *un->body->types.at(field), cur + off, from, to)) return true;
+    }
+    return false;
+  };
+
+  auto ctz_fp = [&](auto&& self, const Type& tp, int cur, int from, int to) -> bool
+  {
+    if (tp.is_float()) return cur >= from && cur <= to;
+    if (auto st = std::get_if<Type::Struct>(&tp.type))
+    {
+      for (auto& [field, off] : st->body->offsets)
+        if (cur + off >= from && cur + off <= to)
+          if (self(self, *st->body->types.at(field), cur + off, from, to)) return true;
+    }
+
+    if (auto un = std::get_if<Type::Union>(&tp.type))
+    {
+      for (auto& [field, off] : un->body->offsets)
+        if (cur + off >= from && cur + off <= to)
+          if (self(self, *un->body->types.at(field), cur + off, from, to)) return true;
+    }
+
+    if (auto arr = std::get_if<Type::Arr>(&tp.type))
+    {
+      assert(false && "Not allowed to return array of any type");
+    }
+    return false;
+  };
+
+  std::vector<std::vector<std::variant<Reg::GPR, Reg::FPR>>> assigned_regs(params.size());
+  std::stringstream temp;
+  size_t tot_sz = 0;
+  for (int i = 0; i < params.size(); i++)
+  {
+    auto arg_t = IR::get_type(params[i].reg);
+    if (arg_t.size() > 16)
+    {
+    }
+    else
+    {
+      struct Chunk
+      {
+        bool is_fp;
+        int from;
+      };
+
+      std::vector<Chunk> chunks;
+      for (int from = 0; from < arg_t.size(); from += 8)
+      {
+        int to = std::min(from + 7, (int)arg_t.size() - 1);
+        
+        bool has_int = ctz_int(ctz_int, arg_t, 0, from, to);
+        bool has_fp  = ctz_fp(ctz_fp, arg_t, 0, from, to);
+        bool is_fp = has_fp && !has_int;
+
+        chunks.push_back({ is_fp, from });
+      }
+
+      int req_gp = 0, req_fp = 0;
+      for (auto& c : chunks)
+      {
+        if (c.is_fp) req_fp++;
+        else req_gp++;
+      }
+
+      bool fits = j + req_gp <= gp_regs.size() && k + req_fp <= fp_regs.size();
+      auto tmp = IR::Operand(params[i].reg);
+      // auto oper = prepare_oper(&tmp);
+      if (fits)
+      {
+        for (auto& c : chunks)
+        {
+          if (c.is_fp) assigned_regs[i].emplace_back(fp_regs[k++]);
+          else assigned_regs[i].emplace_back(gp_regs[j++]);
+        }
+      }
+      else
+      {
+      }
+    }
   }
+
+  for (auto& regs : assigned_regs)
+    for (auto& r : regs)
+      std::visit([&](auto&& arg) { if (pool.contains(arg)) pool.lock(arg); }, r);
 
   int offset = 16;
-  for (int i = len; i < params.size(); i++)
+  for (int i = 0; i < params.size(); i++)
   {
-    auto poper1 = PreOper(Type(Type::Ptr(std::make_shared<Type>(params[i].reg.type))), Reg::GPR::RBP, true, offset, false, nullptr);
-    auto p = prepare_oper(&poper1);
+    auto param_t = IR::get_type(params[i].reg);
+    auto tmp = IR::Operand(params[i].reg);
+    auto oper = prepare_dest(&tmp);
+    if (assigned_regs[i].empty())
+    {
+      int alloc_sz = (param_t.size() > 16 ? (param_t.size() + 15) & -16 : (param_t.size() + 7) & -8);
+      auto temp = PreOper(param_t, pool.alloc_any_gpr(param_t.size()), false, 0, true, &pool);
+      for (int p = 3, s = param_t.size(); s > 0;)
+      {
+        if (s - (1 << p) < 0) { p--; continue; }
 
-    auto poper2 = PreOper(params[i].reg.type, Reg::GPR::R15, false, 0, false, nullptr);
-    IR::Operand oper = params[i].reg;
-    m_text << "# SMOVING PARAM\n\t";
-    MOV(&poper1, &poper2);
+        // m_text << "mov" << sfx(1 << p) << " " << (offset + s) << "(%rbp)" << ", " << oper << "\n\t";
+        m_text << "mov" << sfx(1 << p) << " " << offset << "(%rbp)" << ", " << temp << "\n\t";
+        m_text << "mov" << sfx(1 << p) << " " << temp << ", " << oper << "\n\t";
+        oper.offset += 1 << p;
+        s -= 1 << p;
+        offset += 1 << 3;
+      }
+      // offset += alloc_sz;
+    }
+    else
+    {
+      size_t cur_sz = param_t.size();
+      m_text << "# NOTE: using assigned registers\n\t";
+      for (auto& r : assigned_regs[i])
+      {
+        if (cur_sz >= 8)
+        {
+          if (std::holds_alternative<Reg::FPR>(r)) m_text << "movsd" << " " << r << ", " << oper << "\n\t";
+          else m_text << "movq" << " " << r << ", " << oper << "\n\t";
+          oper.offset += 8;
+          cur_sz -= 8;
+        }
+        else
+        {
+          for (size_t c : { 4, 2, 1 })
+          {
+            if (cur_sz <= 0) break;
+            std::string instr;
+            if (c == 1) instr = "movb";
+            else if (c == 2) instr = "movw";
+            else if (c == 4) instr = "movl";
 
-    // m_text << "mov" << Suffix::Q << " " << poper1 << ", " << poper2 << "\n\t";
-    MOV(&poper2, &oper);
-    // MOV(&poper, &oper);
-    m_text << "# EMOVING PARAM\n\t";
-    offset += params[i].reg.type.size();
+            if (auto reg = std::get_if<Reg::GPR>(&r))
+              m_text << instr << " " << as_sz(*reg, c) << ", " << oper << "\n\t";
+            else if (auto reg = std::get_if<Reg::FPR>(&r))
+              m_text << instr << " " << to128(*reg) << ", " << oper << "\n\t";
+            oper.offset += c;
+            cur_sz -= c;
+          }
+        }
+      }
+    }
   }
 
-  for (int i = 0; i < len; i++)
-    if (pool.usage.count(param_regs[i])) pool.unlock(param_regs[i]);
+  for (auto& regs : assigned_regs)
+    for (auto& r : regs)
+      std::visit([&](auto&& arg) { if (pool.contains(arg)) pool.unlock(arg); }, r);
 }
 
 void CodeGen::gen_call(IR::Call& call)
 {
-  std::vector<Reg::GPR> param_regs = { Reg::GPR::EDI, Reg::GPR::ESI, Reg::GPR::EDX, Reg::GPR::ECX, Reg::GPR::R8D, Reg::GPR::R9D };
-  // assert(call.args.size() <= param_regs.size());
+  std::vector<Reg::GPR> gp_regs = {
+    Reg::GPR::RDI, Reg::GPR::RSI, Reg::GPR::RDX, Reg::GPR::RCX, Reg::GPR::R8, Reg::GPR::R9
+  };
+  std::vector<Reg::FPR> fp_regs = {
+    Reg::FPR::XMM0, Reg::FPR::XMM1, Reg::FPR::XMM2, Reg::FPR::XMM3,
+    Reg::FPR::XMM4, Reg::FPR::XMM5, Reg::FPR::XMM6, Reg::FPR::XMM7
+  };
 
-  int len = std::min(param_regs.size(), call.args.size());
-  for (int i = 0; i < len; i++)
+  int j = 0, k = 0;
+  auto ret_t = IR::get_type(call.dest);
+  if (ret_t.size() > 16)
   {
-    m_text << "pushq " << to64(param_regs[i]) << "\n\t";
-    if (pool.usage.count(param_regs[i])) pool.lock(param_regs[i]);
+    pool.lock(Reg::GPR::RDI);
+    m_text << "subq" << " " << ret_t.size() << ", " << "%rsp\n\t";
+    m_text << "movq %rsp, %rdi\n\t";
   }
-
-  for (int i = 0; i < len; i++)
-  {
-    auto poper = PreOper(IR::get_type(call.args[i]), param_regs[i], false, 0, false, nullptr);
-    IR::Operand oper = call.args[i];
-    MOV(&oper, &poper);
-  }
-
-  int acc = 0;
-  for (int i = len; i < call.args.size(); i++)
-    acc += IR::get_type(call.args[i]).size();
-  
   m_text << "movq %rsp, -1024(%rbp)\n\t";
-  m_text << "subq $15, %rsp\n\t";
-  m_text << "andq $-16, %rsp\n\t";
-  m_text << "subq $" << acc % 16 << ", %rsp" << "\n\t";
-  m_text << "subq $" << acc << ", %rsp" << "\n\t";
 
-  int offset = 0;
-  for (int i = len; i < call.args.size(); i++)
+  auto ctz_int = [&](auto&& self, const Type& tp, int cur, int from, int to) -> bool
   {
-    auto poper = PreOper(Type(Type::Ptr(std::make_shared<Type>(IR::get_type(call.args[i])))), Reg::GPR::RSP, true, offset, false, &pool);
-    IR::Operand oper = call.args[i];
+    if (tp.is_int() || tp.is_ptr_t()) return cur >= from && cur <= to; 
+    if (auto st = std::get_if<Type::Struct>(&tp.type))
+    {
+      for (auto& [field, off] : st->body->offsets)
+        if (cur + off >= from && cur + off <= to)
+          if (self(self, *st->body->types.at(field), cur + off, from, to)) return true;
+    }
+    if (auto un = std::get_if<Type::Union>(&tp.type))
+    {
+      for (auto& [field, off] : un->body->offsets)
+        if (cur + off >= from && cur + off <= to)
+          if (self(self, *un->body->types.at(field), cur + off, from, to)) return true;
+    }
+    return false;
+  };
 
-    m_text << "# SMOVING PARAM\n\t";
-    MOV(&oper, &poper);
-    m_text << "# EMOVING PARAM\n\t";
-    offset += IR::get_type(call.args[i]).size();
+  auto ctz_fp = [&](auto&& self, const Type& tp, int cur, int from, int to) -> bool
+  {
+    if (tp.is_float()) return cur >= from && cur <= to;
+    if (auto st = std::get_if<Type::Struct>(&tp.type))
+    {
+      for (auto& [field, off] : st->body->offsets)
+        if (cur + off >= from && cur + off <= to)
+          if (self(self, *st->body->types.at(field), cur + off, from, to)) return true;
+    }
+
+    if (auto un = std::get_if<Type::Union>(&tp.type))
+    {
+      for (auto& [field, off] : un->body->offsets)
+        if (cur + off >= from && cur + off <= to)
+          if (self(self, *un->body->types.at(field), cur + off, from, to)) return true;
+    }
+
+    if (auto arr = std::get_if<Type::Arr>(&tp.type))
+    {
+      assert(false && "Not allowed to return array of any type");
+    }
+    return false;
+  };
+
+  std::vector<std::vector<std::variant<Reg::GPR, Reg::FPR>>> assigned_regs(call.args.size());
+  size_t tot_sz = 0;
+  for (int i = 0; i < call.args.size(); i++)
+  {
+    auto arg_t = IR::get_type(call.args[i]);
+    if (arg_t.size() > 16)
+    {
+      tot_sz += (arg_t.size() + 15) & -16;
+      // temp << "subq $15, %rsp\n\t";
+      // temp << "andq $-16, %rsp\n\t";
+      // auto sz = ((arg_t.size() + 15) & -16);
+      // tot_sz += sz;
+      /*
+      for (int s = sz; s > 0; s -= 8)
+      {
+        auto oper = prepare_oper(&call.args[i]);
+        temp << "pushq" << " " << oper << "\n\t";
+        oper.offset += 8;
+      }
+      */
+    }
+    else
+    {
+      struct Chunk
+      {
+        bool is_fp;
+        int from;
+      };
+
+      std::vector<Chunk> chunks;
+      for (int from = 0; from < arg_t.size(); from += 8)
+      {
+        int to = std::min(from + 7, (int)arg_t.size() - 1);
+        
+        bool has_int = ctz_int(ctz_int, arg_t, 0, from, to);
+        bool has_fp  = ctz_fp(ctz_fp, arg_t, 0, from, to);
+        bool is_fp = has_fp && !has_int;
+
+        chunks.push_back({ is_fp, from });
+      }
+
+      int req_gp = 0, req_fp = 0;
+      for (auto& c : chunks)
+      {
+        if (c.is_fp) req_fp++;
+        else req_gp++;
+      }
+
+      bool fits = j + req_gp <= gp_regs.size() && k + req_fp <= fp_regs.size();
+      // auto oper = prepare_oper(&call.args[i]);
+      if (fits)
+      {
+        for (auto& c : chunks)
+        {
+          if (c.is_fp) assigned_regs[i].emplace_back(fp_regs[k++]);
+          else assigned_regs[i].emplace_back(gp_regs[j++]);
+        }
+        /*
+        for (auto& c : chunks)
+        {
+          if (c.is_fp) temp << "movsd" << " " << oper << ", " << fp_regs[k++] << "\n\t";
+          else temp << "movq" << " " << oper << ", " << gp_regs[j++] << "\n\t";
+          oper.offset += 8;
+        }
+        */
+      }
+      else
+      {
+        tot_sz += (arg_t.size() + 7) & -8;
+        /*
+        for (int i = chunks.size() - 1; i >= 0; i--)
+        {
+          auto& c = chunks[i];
+          oper.offset += c.from;
+          if (c.is_fp)
+          {
+            tot_sz += 8;
+            temp << "subq $8, %rsp\n\t";
+            temp << "movsd" << " " << oper << ", " << "(%rsp)" << "\n\t";
+          }
+          else
+          {
+            tot_sz += 8;
+            temp << "pushq" << " " << oper << "\n\t";
+          }
+          oper.offset -= c.from;
+        }
+        */
+      }
+    }
   }
 
-  /*
-  m_text << "subq $15, %rsp\n\t";
-  m_text << "andq $-16, %rsp\n\t";
-  */
+  for (auto& regs : assigned_regs)
+    for (auto& r : regs)
+      std::visit([&](auto&& arg) { if (pool.contains(arg)) pool.lock(arg); }, r);
 
+  auto rem = 16 - (tot_sz % 16);
+  if (rem != 0)
+    m_text << "subq" << " " << "$" << rem << ", " << "%rsp" << "\n\t";
+
+  for (int i = call.args.size() - 1; i >= 0; i--)
+  {
+    auto arg_t = IR::get_type(call.args[i]);
+    auto oper = prepare_oper(&call.args[i]);
+    if (assigned_regs[i].empty())
+    {
+      for (int s = arg_t.size(); s > 0; s -= 8)
+      {
+        /*
+        assert(reg != nullptr);
+        m_text << "pushq" << " " << *reg << "\n\t";
+        */
+        m_text << "subq $8, %rsp\n\t";
+        auto er = oper.effective_reg();
+        if (auto reg = std::get_if<Reg::GPR>(&er))
+          m_text << "movq" << " " << to64(*reg) << ", " << "(%rsp)" << "\n\t";
+        else if (auto reg = std::get_if<Reg::FPR>(&er))
+          m_text << "movq" << " " << to128(*reg) << ", " << "(%rsp)" << "\n\t";
+        /*
+        auto poper = PreOper(
+          Type(Type::Ptr(std::make_shared<Type>(Type::Base::I64))),
+          Reg::GPR::RSP,
+          true, 0, false, nullptr
+        );
+        MOV(&oper, &poper);
+        */
+        oper.offset += 8;
+      }
+    }
+    else
+    {
+      for (auto& r : assigned_regs[i])
+      {
+        if (std::holds_alternative<Reg::FPR>(r)) m_text << "movsd" << " " << oper << ", " << r << "\n\t";
+        else
+        {
+          auto gpr = std::get<Reg::GPR>(oper.base_reg);
+          m_text << "movq" << " " << to64(gpr) << ", " << r << "\n\t";
+        }
+        oper.offset += 8;
+      }
+    }
+  }
+
+  // m_text << temp.str();
   m_text << "call " << call.callable << "\n\t";
-
   m_text << "movq -1024(%rbp), %rsp\n\t";
 
-  // m_text << "movq $0, " << acc << "\n\t";
-  /*
-  for (int i = len; i < call.args.size(); i++)
-    m_text << "addq " << "$" << IR::get_type(call.args[i]).size() << ", " << acc << "\n\t";
-  */
-  // m_text << "addq " << acc << ", %rsp" << "\n\t";
+  for (auto& regs : assigned_regs)
+    for (auto& r : regs)
+      std::visit([&](auto&& arg) { if (pool.contains(arg)) pool.lock(arg); }, r);
 
-  for (int i = len - 1; i >= 0; i--)
+  if (ret_t.size() > 16)
   {
-    m_text << "popq " << to64(param_regs[i]) << "\n\t";
-    if (pool.usage.count(param_regs[i])) pool.unlock(param_regs[i]);
-  }
-
-  if (IR::get_type(call.dest).size() <= 0)
-  {
-    Logger::warn("Unexpected return size");
-    Logger::warn("Skipping return..");
-    return;
-  }
-  pool.lock(Reg::GPR::RAX);
-  pool.lock(Reg::GPR::RDX);
-  auto adest = prepare_dest(&call.dest);
-  auto t = IR::get_type(call.dest);
-  int size = t.size();
-
-  if (size <= 8)
-  {
-    auto poper = PreOper(t, Reg::GPR::RAX, false, 0, false, nullptr);
-    MOV(&poper, &adest);
-  }
-  else if (size <= 16)
-  {
-    auto poper1 = PreOper(Type(Type::Base::I64), Reg::GPR::RAX, false, 0, false, nullptr);
-    auto poper2 = PreOper(Type(Type::Base::I64), Reg::GPR::RDX, false, 0, false, nullptr);
-    MOV(&poper1, &adest);
-    adest.offset += 8;
-    MOV(&poper2, &adest);
-  }
-  else
-  {
-    auto poper = PreOper(t, Reg::GPR::RAX, true, 0, false, nullptr);
-    m_text << "# return (start) " << "(" << t << ")\n\t";
+    pool.lock(Reg::GPR::RAX);
+    auto adest = prepare_dest(&call.dest);
+    int size = ret_t.size();
+    auto poper = PreOper(ret_t, Reg::GPR::RAX, true, 0, false, nullptr);
     for (int p = 3; size > 0; size -= (1 << p))
     {
       while (p >= 0 && size - (1 << p) < 0) p--;
       MOV(&poper, &adest);
-      // auto lit = IR::Operand(IR::Lit(1 << p, Type(Type::Base::I64)));
-      // ADD(&adest, &lit, &adest);
       adest.offset += 1 << p;
       poper.offset += 1 << p;
     }
+    m_text << "addq" << " " << ret_t.size() << ", " << "%rsp\n\t";
+    pool.unlock(Reg::GPR::RAX);
   }
+  else
+  {
+    auto adest = prepare_dest(&call.dest);
+    int i = 0, j = 0;
+    std::vector<Reg::GPR> ret_gpr = { Reg::GPR::RAX, Reg::GPR::RDX };
+    std::vector<Reg::FPR> ret_fpr = { Reg::FPR::XMM0, Reg::FPR::XMM1 };
 
-  m_text << "# return (end)\n\t";
-  pool.unlock(Reg::GPR::RDX);
-  pool.unlock(Reg::GPR::RAX);
-  // const auto& dest = format_operand(call.dest);
-  // m_text << "movl %eax, " << dest << "\n\t";
+    for (int from = 0; from < ret_t.size(); from += 8)
+    {
+      int to = std::min(from + 7, (int)ret_t.size() - 1);
+
+      bool has_int = ctz_int(ctz_int, ret_t, 0, from, to);
+      bool has_fp  = ctz_fp(ctz_fp, ret_t, 0, from, to);
+      bool is_fp = has_fp && !has_int;
+
+      if (is_fp)
+        m_text << "movsd" << " " << ret_fpr[j++] << ", " << adest << "\n\t";
+      else
+        m_text << "movq" << " " << ret_gpr[i++] << ", " << adest << "\n\t";
+      adest.offset += 8;
+    }
+  }
 }
 
 void CodeGen::gen_param(IR::Param& param)
@@ -1202,30 +1651,115 @@ void CodeGen::gen_param(IR::Param& param)
 
 void CodeGen::gen_ret(IR::Ret& ret)
 {
+  // no need to lock XMM0/XMM1 as they are not in the pool
   pool.lock(Reg::GPR::RAX);
   pool.lock(Reg::GPR::RDX);
   auto aval = prepare_oper(&ret.ret);
   auto t = IR::get_type(ret.ret);
   int size = t.size();
+
+  std::vector<Reg::GPR> ret_gpr = { Reg::GPR::RAX, Reg::GPR::RDX };
+  std::vector<Reg::FPR> ret_fpr = { Reg::FPR::XMM0, Reg::FPR::XMM1 };
+  int i = 0, j = 0;
+
+  auto ctz_fp = [&](auto&& self, const Type& tp, int cur, int from, int to) -> bool
+  {
+    if (tp.is_float()) return cur >= from && cur <= to;
+    if (auto st = std::get_if<Type::Struct>(&tp.type))
+    {
+      for (auto& [field, off] : st->body->offsets)
+        if (cur + off >= from && cur + off <= to)
+          if (self(self, *st->body->types.at(field), cur + off, from, to)) return true;
+    }
+
+    if (auto un = std::get_if<Type::Union>(&tp.type))
+    {
+      for (auto& [field, off] : un->body->offsets)
+        if (cur + off >= from && cur + off <= to)
+          if (self(self, *un->body->types.at(field), cur + off, from, to)) return true;
+    }
+
+    if (auto arr = std::get_if<Type::Arr>(&tp.type))
+    {
+      assert(false && "Not allowed to return array of any type");
+      // return self(self, *arr->of, cur, from, to);
+    }
+    return false;
+  };
+
+  auto ctz_int = [&](auto&& self, const Type& tp, int cur, int from, int to) -> bool
+  {
+    if (tp.is_int() || tp.is_ptr_t()) return cur >= from && cur <= to; 
+    if (auto st = std::get_if<Type::Struct>(&tp.type))
+    {
+      for (auto& [field, off] : st->body->offsets)
+        if (cur + off >= from && cur + off <= to)
+          if (self(self, *st->body->types.at(field), cur + off, from, to)) return true;
+    }
+    if (auto un = std::get_if<Type::Union>(&tp.type))
+    {
+      for (auto& [field, off] : un->body->offsets)
+        if (cur + off >= from && cur + off <= to)
+          if (self(self, *un->body->types.at(field), cur + off, from, to)) return true;
+    }
+    return false;
+  };
+
   if (size <= 8)
   {
-    auto poper = PreOper(t, Reg::GPR::RAX, false, 0, false, nullptr);
+    std::variant<Reg::GPR, Reg::FPR> var;
+    if (ctz_int(ctz_int, t, 0, 0, 7)) var = ret_gpr[i++];
+    else var = ret_fpr[j++];
+
+    auto poper = PreOper(t, var, false, 0, false, nullptr);
     MOV(&ret.ret, &poper);
   }
   else if (size <= 16)
   {
-    auto poper1 = PreOper(Type(Type::Base::I64), Reg::GPR::RAX, false, 0, false, nullptr);
-    auto poper2 = PreOper(Type(Type::Base::I64), Reg::GPR::RDX, false, 0, false, nullptr);
+    std::variant<Reg::GPR, Reg::FPR> var1, var2;
+    if (ctz_int(ctz_int, t, 0, 0, 7)) var1 = ret_gpr[i++];
+    else var1 = ret_fpr[j++];
+
+    if (ctz_int(ctz_int, t, 0, 8, 15)) var2 = ret_gpr[i++];
+    else var2 = ret_fpr[j++];
+
+    auto poper1 = PreOper(
+      std::holds_alternative<Reg::GPR>(var1) ? Type(Type::Base::I64) : Type(Type::Base::F64),
+      var1, false, 0, false, nullptr
+    );
+    auto poper2 = PreOper(
+      std::holds_alternative<Reg::GPR>(var2) ? Type(Type::Base::I64) : Type(Type::Base::F64),
+      var2, false, 0, false, nullptr
+    );
     MOV(&aval, &poper1);
     aval.offset += 8;
     MOV(&aval, &poper2);
   }
   else
   {
+    auto dest = PreOper(Type(Type::Ptr(std::make_shared<Type>(t))), Reg::GPR::RDI, true, 0, false, nullptr);
+    for (int i = 3; i >= 0;)
+    {
+      if (size < (1 << i)) { i--; continue; }
+      /*
+      switch (i)
+      {
+        case (3): m_text << "movq" << " " << aval << " " << dest << "\n\t";
+        case (2): m_text << "movl" << " " << aval << " " << dest << "\n\t";
+        case (1): m_text << "movw" << " " << aval << " " << dest << "\n\t";
+        case (0): m_text << "movb" << " " << aval << " " << dest << "\n\t";
+        default: assert(false);
+      }
+      */
+      MOV(&aval, &dest);
+      dest.offset += 1 << i;
+      aval.offset += 1 << i;
+    }
     // force evacuation
-    // auto tmp = pool.alloc_any(8);
+    // auto tmp = pool.alloc_any_gpr(8);
     // auto poper_mv = PreOper(Type(Type::Base::I64), tmp, false, 0, false, nullptr);
     // MOV(&rax, &poper_mv);
+    /*
     auto poper = PreOper(
       Type(Type::Ptr(std::make_shared<Type>(IR::get_type(ret.ret)))),
       Reg::GPR::RAX,
@@ -1237,6 +1771,7 @@ void CodeGen::gen_ret(IR::Ret& ret)
     auto r = IR::Operand(IR::Reg(t));
     MOV(&ret.ret, &r);
     ADDR_OF(&r, &poper);
+    */
   }
   // ADDR_OF(&ret.ret, &poper);
   // MOV(&poper_mv, &rax);
