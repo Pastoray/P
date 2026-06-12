@@ -242,12 +242,26 @@ Sema::ExprInfo Sema::analyze_float(const Node::Float& float_)
   return ExprInfo(Type(Type::Base::F64), ValCat::RVALUE);
 }
 
+Sema::ExprInfo Sema::analyze_string(const Node::String& str)
+{
+  return ExprInfo(Type(Type::Ptr(std::make_shared<Type>(Type::Base::CHAR))), ValCat::RVALUE);
+}
+
+Sema::ExprInfo Sema::analyze_char(const Node::Char& c)
+{
+  return ExprInfo(Type(Type::Base::CHAR), ValCat::RVALUE);
+}
+
 Sema::ExprInfo Sema::analyze_lit(const std::shared_ptr<Node::Lit>& lit)
 {
   if (auto int_ = std::dynamic_pointer_cast<Node::Int>(lit))
     return analyze_int(*int_);
   if (auto float_ = std::dynamic_pointer_cast<Node::Float>(lit))
     return analyze_float(*float_);
+  if (auto string = std::dynamic_pointer_cast<Node::String>(lit))
+    return analyze_string(*string);
+  if (auto c = std::dynamic_pointer_cast<Node::Char>(lit))
+    return analyze_char(*c);
   else if (auto ident = std::dynamic_pointer_cast<Node::Ident>(lit))
     return analyze_ident(*ident);
   Utils::panic("Unexpected analyze literal");

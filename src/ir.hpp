@@ -62,7 +62,7 @@ namespace IR
 
   struct Label
   {
-    enum Kind { DATA, CODE };
+    enum Kind { CODE, BSS, RODATA };
 
     static uint32_t nid;
     Type type;
@@ -80,8 +80,14 @@ namespace IR
       return Label("label_" + std::to_string(nid), CODE, Type(Type::Base::VOID));
     }
 
-    static Label create_data(std::string name, Type tp)
-    { return Label(std::move(name), DATA, std::move(tp)); }
+    static Label create_bss(std::string name, Type tp)
+    { return Label(std::move(name), BSS, std::move(tp)); }
+
+    static Label create_rodata(Type tp)
+    {
+      // assert(tp.is_base_t());
+      return Label("LC" + std::to_string(nid), RODATA, std::move(tp));
+    }
 
     bool operator==(const Label& other) const noexcept { return name == other.name; }
     bool operator<(const Label& other) const noexcept { return name < other.name; }
@@ -525,6 +531,8 @@ class IRGen
     void visit(const Node::Ident&) override;
     void visit(const Node::Int&) override;
     void visit(const Node::Float&) override;
+    void visit(const Node::String&) override;
+    void visit(const Node::Char&) override;
     void visit(const Node::Call&) override;
 
     void visit(const Node::TypeRef&) override;
@@ -553,6 +561,8 @@ private:
   void gen_ident(const Node::Ident&);
   void gen_int(const Node::Int&);
   void gen_float(const Node::Float&);
+  void gen_string(const Node::String&);
+  void gen_char(const Node::Char&);
   // void gen_member(const Node::Member& mem);
   void gen_asgn(const Node::Asgn&);
 

@@ -35,11 +35,14 @@
   OP(NOT, "!") \
   OP(DOT, ".") \
   OP(COL, ":") \
+  OP(QM, "\"") \
   OP(SEMICOL, ";")
 
 #define LITERAL_LIST \
   OP(INT, "int") \
   OP(FLOAT, "float") \
+  OP(STRING, "string") \
+  OP(CHAR, "char") \
   OP(IDENT, "ident")
 
 #define KEYWORD_LIST \

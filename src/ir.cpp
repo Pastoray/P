@@ -35,6 +35,10 @@ void IRGen::Visitor::visit(const Node::Int& int_) { m_gen.gen_int(int_); }
 
 void IRGen::Visitor::visit(const Node::Float& float_) { m_gen.gen_float(float_); };
 
+void IRGen::Visitor::visit(const Node::String& string) { m_gen.gen_string(string); };
+
+void IRGen::Visitor::visit(const Node::Char& c) { m_gen.gen_char(c); };
+
 void IRGen::Visitor::visit(const Node::TypeRef& ref) { m_gen.gen_ref(ref); }
 
 void IRGen::Visitor::visit(const Node::TypeDef& def) { m_gen.gen_def(def); }
@@ -734,7 +738,32 @@ void IRGen::gen_int(const Node::Int& int_)
 
 void IRGen::gen_float(const Node::Float& float_)
 {
-  m_stack.emplace(IR::Lit(float_.val, Type(Type::Base::F64)));
+  IR::Label l = IR::Label::create_rodata(Type(Type::Base::F64));
+  auto lit = IR::Lit(float_.val, Type(Type::Base::F64));
+  m_instructs->emplace_back(IR::GStore(l, lit));
+  m_stack.emplace(l);
+}
+
+void IRGen::gen_string(const Node::String& string)
+{
+  auto t = Type(Type::Ptr(std::make_shared<Type>(Type::Base::CHAR)));
+  // IR::Label l = IR::Label::create_rodata(Type(Type::Base::CHAR));
+  // auto lit = IR::Lit(string.val, Type(Type::Base::CHAR));
+  IR::Label l = IR::Label::create_rodata(t);
+  auto lit = IR::Lit(string.val, t);
+  m_instructs->emplace_back(IR::GStore(l, lit));
+
+  IR::Reg r(t);
+  m_instructs->emplace_back(IR::Unop{ r, l, UnOp::ADDR_OF });
+  m_stack.emplace(r);
+}
+
+void IRGen::gen_char(const Node::Char& c)
+{
+  IR::Label l = IR::Label::create_rodata(Type(Type::Base::CHAR));
+  auto lit = IR::Lit(c.val, Type(Type::Base::CHAR));
+  m_instructs->emplace_back(IR::GStore(l, lit));
+  m_stack.emplace(l);
 }
 
 void IRGen::gen_ref(const Node::TypeRef& ref)
@@ -807,8 +836,8 @@ void IRGen::gen_asgn(const Node::Asgn& asgn)
             auto top = m_stack.top();
             if (ext->is_global)
             {
-              m_instructs->emplace_back(IR::GStore(IR::Label::create_data(asgn.id.name, IR::get_type(top)), top));
-              auto lbl = IR::Label::create_data(asgn.id.name, IR::get_type(top));
+              auto lbl = IR::Label::create_bss(asgn.id.name, IR::get_type(top));
+              m_instructs->emplace_back(IR::GStore(lbl, top));
               aid_to_l.try_emplace(sym.id, lbl);
             }
             else
@@ -830,9 +859,9 @@ void IRGen::gen_asgn(const Node::Asgn& asgn)
       auto top = IR::Lit(0, *Node::get_res_t(asgn.type));
       if (ext->is_global)
       {
-        m_instructs->emplace_back(IR::GStore(IR::Label::create_data(asgn.id.name, IR::get_type(top)), top));
+        auto lbl = IR::Label::create_bss(asgn.id.name, IR::get_type(top));
+        m_instructs->emplace_back(IR::GStore(lbl, top));
         auto key = m_anl.sym_table.at(asgn.id.id).id;
-        auto lbl = IR::Label::create_data(asgn.id.name, IR::get_type(top));
         aid_to_l.try_emplace(key, lbl);
       }
       else
