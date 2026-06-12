@@ -26,10 +26,9 @@ struct Type
     U16,
     U32,
     U64,
-    STR,
     F32,
     F64,
-    BYTE,
+    CHAR,
     VOID,
   };
   struct Struct
@@ -218,7 +217,7 @@ struct Type
 
             case Base::I8:
             case Base::U8:
-            case Base::BYTE:
+            case Base::CHAR:
               return 1;
 
             case Base::I16:
@@ -233,7 +232,6 @@ struct Type
             case Base::I64:
             case Base::U64:
             case Base::F64:
-            case Base::STR:
               return 8;
 
             default:
@@ -378,14 +376,12 @@ struct Type
       return Base::U32;
     else if (str == "u64")
       return Base::U64;
-    else if (str == "str")
-      return Base::STR;
     else if (str == "f32")
       return Base::F32;
     else if (str == "f64")
       return Base::F64;
-    else if (str == "byte")
-      return Base::BYTE;
+    else if (str == "char")
+      return Base::CHAR;
     else if (str == "void")
       return Base::VOID;
     return {};
@@ -403,10 +399,9 @@ struct Type
       case Base::U16:  return "U16";
       case Base::U32:  return "U32";
       case Base::U64:  return "U64";
-      case Base::STR:  return "STR";
       case Base::F32:  return "F32";
       case Base::F64:  return "F64";
-      case Base::BYTE: return "BYTE";
+      case Base::CHAR: return "CHAR";
       case Base::VOID: return "VOID";
       default: return "UNKNOWN";
     }
@@ -459,7 +454,7 @@ struct Type
           if (bt == Base::F32) return 305;
           if (bt >= Base::I8 && bt <= Base::I64) return 100 + Type(bt).size() + 5;
           if (bt >= Base::U8 && bt <= Base::U64) return 100 + Type(bt).size();
-          if (bt == Base::BYTE) return 50;
+          if (bt == Base::CHAR) return 50;
           return 1;
         },
         [](const Ptr& ptr) -> int

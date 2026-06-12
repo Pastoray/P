@@ -164,5 +164,15 @@ void printf64(double x)
   write(1, buf, i);
 }
 
+void printstr(char* x)
+{
+  write(1, x, strlen(x));
+}
+
+void printchar(char x)
+{
+  write(1, &x, 1);
+}
+
 void print(const char* buf)
 { write(1, buf, strlen(buf)); }

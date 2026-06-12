@@ -26,7 +26,7 @@ int32_t CodeGen::reg_offset(const IR::Reg& reg)
   if (m_reg_offset.find(reg) == m_reg_offset.end())
   {
     // m_rbpoff -= (int32_t)reg.reserve;
-    std::cout << reg.type << ": " << reg.type.size() << std::endl;
+    // std::cout << reg.type << ": " << reg.type.size() << std::endl;
     m_rbpoff -= reg.type.size();
     m_reg_offset[reg] = m_rbpoff;
   }
@@ -859,10 +859,57 @@ PreOper CodeGen::prepare_oper(IR::Operand* oper)
 
 void CodeGen::gen_gstore(IR::GStore& gstore)
 {
+  auto dt = gstore.dest.type;
+  switch (gstore.dest.kind)
+  {
+    case (IR::Label::Kind::BSS):
+      {
+        m_bss << gstore.dest.name << ": .space " << dt.size() << "\n\t";
+        auto store = IR::Store(IR::Operand(gstore.dest), gstore.val);
+        gen_store(store);
+      }
+      break;
+    case (IR::Label::Kind::RODATA):
+      {
+        if (
+          dt.is_ptr_t() &&
+          dt.inner()->is_base_t() &&
+          std::get<Type::Base>(dt.inner()->type) == Type::Base::CHAR
+        ) { m_rodata << gstore.dest.name << ": .string " << "\"" << gstore.val << "\"" << "\n\t"; break; }
+          
+        // std::cout << dt << std::endl;
+        assert(dt.is_base_t());
+        std::string type_name = [&]()
+        {
+          auto bt = std::get<Type::Base>(dt.type);
+          switch (bt)
+          {
+            case (Type::Base::CHAR): return std::string("byte");
+            case (Type::Base::F32): return std::string("float");
+            case (Type::Base::F64): return std::string("double");
+            default: assert(false);
+          }
+          return std::string("");
+        }();
+
+        if (type_name == "byte")
+        {
+          m_rodata << gstore.dest.name << ": ." << type_name << " " << "\'" << gstore.val << "\'" << "\n\t";
+        }
+        else
+        {
+          m_rodata << gstore.dest.name << ": ." << type_name << " " << gstore.val << "\n\t";
+        }
+      }
+      break;
+    default: assert(false);
+  }
   // change to actual size
-  m_bss << gstore.dest.name << ": .space " << gstore.dest.type.size() << "\n\t";
+  /*
+  m_bss << gstore.dest.name << ": .space " << dt.size() << "\n\t";
   auto store = IR::Store(IR::Operand(gstore.dest), gstore.val);
   gen_store(store);
+  */
 }
 
 void CodeGen::gen_store(IR::Store& store)

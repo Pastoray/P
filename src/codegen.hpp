@@ -616,14 +616,17 @@ private:
       std::string operator()(const IR::Reg& r) const { return std::to_string(gen->reg_offset(r)) + "(%rbp)"; }
       std::string operator()(const IR::Lit& l) const
       {
-        static int lc_cnt = 0;
+        // static int lc_cnt = 0;
         if (l.is_float())
         {
+          /*
           std::string lc = ".LC" + std::to_string(lc_cnt++);
           auto old_prec = gen->m_rodata.precision();
           gen->m_rodata << lc << ":\n\t\t" << ".double " << std::setprecision(17) << l.as_float() << "\n\t";
           gen->m_rodata.precision(old_prec);
           return lc + "(%rip)";
+          */
+          assert(false);
         }
         else if (l.is_str()) assert(false && "NYI");
         else return "$" + std::to_string(l.as_int());
@@ -649,7 +652,8 @@ private:
         return res.str();
 
       }
-      std::string operator()(const IR::Label& l) const { return l.name + (l.kind == IR::Label::DATA ? "(%rip)" : ""); }
+      std::string operator()(const IR::Label& l) const
+      { return l.name + ((l.kind == IR::Label::BSS) || (l.kind == IR::Label::RODATA) ? "(%rip)" : ""); }
     };
     return std::visit(Formatter{this}, oper);
     /*

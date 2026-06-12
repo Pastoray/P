@@ -1,5 +1,6 @@
 #include "tokenizer.hpp"
 #include "utils.hpp"
+#include <cassert>
 
 Tokenizer::Tokenizer(std::string& src) : m_src(std::move(src)), m_index(0) {}
 Tokenizer::Tokenizer(std::string&& src) : m_src(std::move(src)), m_index(0) {}
@@ -255,16 +256,34 @@ std::vector<Token> Tokenizer::tokenize()
       consume();
       tokens.emplace_back(TokenTypes::Symbol::DOT);
     }
-    else if (peek().value() == ' ' || peek().value() == '\n' ||
-             peek().value() == '\t')
+    else if (peek().value() == '\"')
     {
       consume();
+      for (; peek() && peek() != '\"'; buffer += consume());
+      assert(peek() && peek() == '\"');
+      consume();
+
+      tokens.emplace_back(TokenTypes::Literal::STRING, buffer);
+      buffer.clear();
     }
+    else if (peek().value() == '\'')
+    {
+      consume();
+      for (; peek() && peek() != '\''; buffer += consume());
+      assert(peek() && peek() == '\'');
+      consume();
+
+      tokens.emplace_back(TokenTypes::Literal::CHAR, buffer);
+      buffer.clear();
+    }
+    else if (peek().value() == ' ' || peek().value() == '\n' || peek().value() == '\t')
+      consume();
   }
   return tokens;
 }
 
-[[nodiscard]] std::optional<char> Tokenizer::peek(const int offset) const
+[[nodiscard]]
+std::optional<char> Tokenizer::peek(const int offset) const
 {
   if (m_index + offset < m_src.size())
     return m_src[m_index + offset];
