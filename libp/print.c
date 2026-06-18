@@ -1,21 +1,12 @@
-#include "defs.h"
+#include "string.h"
+#include "sys_wrapper.h"
 
-long strlen(const char* buf)
-{
-  const char* cur = buf;
-  while (*cur != '\0')
-  {
-    cur++;
-  }
-  return cur - buf;
-}
-
+/*
 long write(int fd, const char* buf, long count)
 {
-  int res;
+  long res;
   asm volatile (
     "syscall\n\t"
-    "mov %%eax, %0\n\t"
     : "=a" (res)
     : "a" ((long)SYS_WRITE),
       "D" ((long)fd),
@@ -26,12 +17,57 @@ long write(int fd, const char* buf, long count)
   return res;
 }
 
+long read(int fd, char* buf, long count)
+{
+  long res;
+  asm volatile (
+    "syscall\n\t"
+    : "=a" (res)
+    : "a" ((long)SYS_READ),
+      "D" ((long)fd),
+      "S" (buf),
+      "d" (count)
+    : "rcx", "r11", "memory", "cc"
+  );
+  return res;
+}
+
+long open(const char* filename, int flags, int mode)
+{
+  long res;
+  asm volatile (
+    "syscall\n\t"
+    : "=a" (res)
+    : "a" ((long)SYS_OPEN),
+      "D" (filename),
+      "S" ((long)flags),
+      "d" ((long)mode)
+    : "rcx", "r11", "memory", "cc"
+  );
+  return res;
+}
+
+long close(int fd)
+{
+  long res;
+  asm volatile (
+    "syscall\n\t"
+    : "=a" (res)
+    : "a" ((long)SYS_CLOSE),
+      "D" ((long)fd)
+    : "rcx", "r11", "memory", "cc"
+  );
+  return res;
+}
+*/
+
 void printi32(int32_t x)
 {
   char buf[13];
   if (x == 0)
   {
-    write(1, "0\n", 2);
+    syscall(SYS_WRITE, 1, "0\n", 2);
+    // write(1, "0\n", 2);
     return;
   }
 
@@ -50,7 +86,8 @@ void printi32(int32_t x)
 
   buf[i++] = '\n';
   buf[i] = '\0';
-  write(1, buf, i);
+  syscall(SYS_WRITE, 1, buf, i);
+  // write(1, buf, i);
 }
 
 void printi64(int64_t x)
@@ -58,7 +95,8 @@ void printi64(int64_t x)
   char buf[23];
   if (x == 0)
   {
-    write(1, "0\n", 2);
+    syscall(SYS_WRITE, 1, "0\n", 2);
+    // write(1, "0\n", 2);
     return;
   }
 
@@ -77,7 +115,8 @@ void printi64(int64_t x)
 
   buf[i++] = '\n';
   buf[i] = '\0';
-  write(1, buf, i);
+  syscall(SYS_WRITE, 1, buf, i);
+  // write(1, buf, i);
 }
 
 void printf32(float x)
@@ -85,7 +124,8 @@ void printf32(float x)
   char buf[50];
   if (x == 0)
   {
-    write(1, "0.0\n", 4);
+    syscall(SYS_WRITE, 1, "0.0\n", 4);
+    // write(1, "0.0\n", 4);
     return;
   }
 
@@ -119,7 +159,8 @@ void printf32(float x)
 
   buf[i++] = '\n';
   buf[i] = '\0';
-  write(1, buf, i);
+  syscall(SYS_WRITE, 1, buf, i);
+  // write(1, buf, i);
 }
 
 void printf64(double x)
@@ -127,7 +168,8 @@ void printf64(double x)
   char buf[50];
   if (x == 0)
   {
-    write(1, "0.0\n", 4);
+    syscall(SYS_WRITE, 1, "0.0\n", 4);
+    // write(1, "0.0\n", 4);
     return;
   }
 
@@ -161,18 +203,22 @@ void printf64(double x)
 
   buf[i++] = '\n';
   buf[i] = '\0';
-  write(1, buf, i);
+  syscall(SYS_WRITE, 1, buf, i);
+  // write(1, buf, i);
 }
 
 void printstr(char* x)
 {
-  write(1, x, strlen(x));
+  syscall(SYS_WRITE, 1, x, strlen(x));
+  // write(1, x, strlen(x));
 }
 
 void printchar(char x)
 {
-  write(1, &x, 1);
+  syscall(SYS_WRITE, 1, &x, 1);
+  // write(1, &x, 1);
 }
 
 void print(const char* buf)
-{ write(1, buf, strlen(buf)); }
+{ syscall(SYS_WRITE, 1, buf, strlen(buf)); } // write(1, buf, strlen(buf)); }
+
