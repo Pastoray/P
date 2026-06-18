@@ -106,7 +106,12 @@ void IRGen::gen_expr_stmt(const Node::ExprStmt& expr_stmt)
 void IRGen::gen_fn(const Node::Func& func)
 {
   if (!func.scope.has_value())
+  {
+    IR::Label fn_lab = IR::Label::create_code(func.id.name);
+    auto sym = m_anl.sym_table.at(func.id.id);
+    aid_to_l.try_emplace(sym.id, fn_lab);
     return;
+  }
   
   /* instead of flattening the function we keep it packed */
   // auto old_sym_table = sym_table;
@@ -121,6 +126,8 @@ void IRGen::gen_fn(const Node::Func& func)
   */
 
   IR::Label fn_lab = IR::Label::create_code(func.id.name);
+  auto sym = m_anl.sym_table.at(func.id.id);
+  aid_to_l.try_emplace(sym.id, fn_lab);
   // IR::Label end_lab = IR::Label::create_code(func.id.name + "_end");
   IR::Label end_lab = IR::Label::create_code();
   m_instructs->emplace_back(IR::Jmp(end_lab));
@@ -900,7 +907,12 @@ void IRGen::gen_if(const Node::If& if_)
   IR::Label if_label = IR::Label::create_code();
   IR::Label else_label = IR::Label::create_code();
 
-  m_instructs->emplace_back(IR::Jne{ cond, IR::Lit(0, Type(Type::Base::I32)), if_label });
+  auto v = IR::Lit(0, Type(Type::Base::I32));
+  coerce(v, IR::get_type(cond));
+  auto rhs = m_stack.top();
+  m_stack.pop();
+
+  m_instructs->emplace_back(IR::Jne{ cond, rhs, if_label });
   m_instructs->emplace_back(IR::Jmp{ else_label });
   m_instructs->emplace_back(if_label);
 
@@ -922,7 +934,12 @@ void IRGen::gen_if(const Node::If& if_)
     IR::Label new_if_label = IR::Label::create_code();
     IR::Label new_else_label = IR::Label::create_code();
 
-    m_instructs->emplace_back(IR::Jne{ new_cond, IR::Lit(0, Type(Type::Base::I32)), new_if_label });
+    auto v = IR::Lit(0, Type(Type::Base::I32));
+    coerce(v, IR::get_type(new_cond));
+    auto rhs = m_stack.top();
+    m_stack.pop();
+
+    m_instructs->emplace_back(IR::Jne{ new_cond, rhs, new_if_label });
     m_instructs->emplace_back(IR::Jmp{ new_else_label });
     m_instructs->emplace_back(new_if_label);
 
@@ -954,7 +971,12 @@ void IRGen::gen_for(const Node::For& for_)
     m_stack.pop();
   }
 
-  m_instructs->emplace_back(IR::Jeq{ cond, IR::Lit(0, Type(Type::Base::I32)), end_label });
+  auto v = IR::Lit(0, Type(Type::Base::I32));
+  coerce(v, IR::get_type(cond));
+  auto rhs = m_stack.top();
+  m_stack.pop();
+
+  m_instructs->emplace_back(IR::Jeq{ cond, rhs, end_label });
   m_ctx_stack.push_back(ScopeCtx{ adv_label, end_label, ScopeCtx::Kind::LOOP });
   gen_scope(*for_.scope);
   m_ctx_stack.pop_back();

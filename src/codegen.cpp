@@ -639,11 +639,17 @@ void CodeGen::gen_instr(IR::Instruct& instr)
       [this](IR::Nop& i) { gen_nop(i); },
       [this](IR::ImpCast& i) { gen_impc(i); },
       [this](IR::Alloca& i) { gen_alloca(i); },
-      [this](IR::Allocc& i) {},
+      [this](IR::Allocc& i) { assert(false); },
       [this](std::shared_ptr<IR::Func>& i) { gen_fn(*i); },
       [](auto&) { std::cerr << "ERROR UNKNOWN INSTRUCTION" << std::endl; std::exit(-1); }
     }, instr
   );
+
+  for (auto& [reg, cnt] : pool.gpr_usage)
+    assert(cnt == 0 && "Detected register leak");
+
+  for (auto& [reg, cnt] : pool.fpr_usage)
+    assert(cnt == 0 && "Detected register leak");
 }
 
 PreOper CodeGen::prepare_oper(OperandPtr oper)
@@ -831,6 +837,18 @@ PreOper CodeGen::prepare_oper(IR::Operand* oper)
     }
     PreOper operator()(IR::Label& l)
     {
+      // movq fn, %rax evaluates to pointer dereference
+      // so we must explicitely leaq
+      if (l.kind == IR::Label::Kind::CODE)
+      {
+        std::variant<Reg::GPR, Reg::FPR> tmp = gen.pool.alloc_any_gpr(8);
+        gen.m_text << "leaq";
+        auto print_reg = [&](const auto& reg) { gen.m_text << reg; };
+        gen.m_text << " " << gen.format_operand(l) << "(%rip)" << ", ";
+        std::visit(print_reg, tmp);
+        gen.m_text << "\n\t";
+        return PreOper(Type(Type::Ptr(std::make_shared<Type>(Type::Base::VOID))), tmp, false, 0, true, &gen.pool);
+      }
       Suffix suf = sfx(l.type.size());
       std::variant<Reg::GPR, Reg::FPR> tmp;
       if (l.type.is_float())
@@ -927,12 +945,6 @@ void CodeGen::gen_store(IR::Store& store)
 void CodeGen::gen_binop(IR::Binop& binop)
 {
   m_text << "# binop (start)" << "\n\t";
-
-  for (auto& [reg, cnt] : pool.gpr_usage)
-    assert(cnt == 0 && "Detected register leak");
-
-  for (auto& [reg, cnt] : pool.fpr_usage)
-    assert(cnt == 0 && "Detected register leak");
 
   // assert(pool.available.size() == 5 && "Detected register leak");
   switch (binop.op)
@@ -1646,14 +1658,14 @@ void CodeGen::gen_call(IR::Call& call)
 
   for (auto& regs : assigned_regs)
     for (auto& r : regs)
-      std::visit([&](auto&& arg) { if (pool.contains(arg)) pool.lock(arg); }, r);
+      std::visit([&](auto&& arg) { if (pool.contains(arg)) pool.unlock(arg); }, r);
 
   if (ret_t.size() > 16)
   {
-    pool.lock(Reg::GPR::RAX);
+    // pool.lock(Reg::GPR::RAX);
     auto adest = prepare_dest(&call.dest);
     int size = ret_t.size();
-    auto poper = PreOper(ret_t, Reg::GPR::RAX, true, 0, false, nullptr);
+    auto poper = PreOper(ret_t, Reg::GPR::RDI, true, 0, false, nullptr);
     for (int p = 3; size > 0; size -= (1 << p))
     {
       while (p >= 0 && size - (1 << p) < 0) p--;
@@ -1662,7 +1674,7 @@ void CodeGen::gen_call(IR::Call& call)
       poper.offset += 1 << p;
     }
     m_text << "addq" << " " << ret_t.size() << ", " << "%rsp\n\t";
-    pool.unlock(Reg::GPR::RAX);
+    pool.unlock(Reg::GPR::RDI);
   }
   else
   {
