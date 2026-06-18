@@ -11,10 +11,9 @@
 
 uint32_t Node::Ident::nid = 0;
 Parser::Parser(std::vector<Token>& tokens, Sema& sema)
-    : m_tokens(std::move(tokens)),
-      m_pre_sema(sema),
-      m_index(0)
-{}
+  : m_tokens(std::move(tokens)),
+    m_pre_sema(sema),
+    m_index(0) {}
 
 std::vector<Node::Node> Parser::parse_prog()
 {

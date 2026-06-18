@@ -11,8 +11,7 @@
 
 
 uint32_t Sema::Symbol::nid = 0;
-Sema::Sema(const std::vector<Node::Node>& nodes)
-    : m_nodes(nodes)
+Sema::Sema(const std::vector<Node::Node>& nodes) : m_nodes(nodes)
 {
   auto global_scope = std::make_unique<Scope>();
   m_scope_stack.push_back(std::move(global_scope));
