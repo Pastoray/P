@@ -14,8 +14,8 @@ inline void test_parse_expr_simple()
   Tokenizer tokenizer(input);
   auto tokens = tokenizer.tokenize();
 
-  Sema sema({});
-  Parser parser(tokens, sema);
+  // Sema sema({});
+  Parser parser(tokens);
   auto expr = parser.parse_expr();
 
   assert(expr.has_value());
@@ -29,8 +29,8 @@ inline void test_parse_expr_binop()
   Tokenizer tokenizer(input);
   auto tokens = tokenizer.tokenize();
 
-  Sema sema({});
-  Parser parser(tokens, sema);
+  // Sema sema({});
+  Parser parser(tokens);
   auto expr = parser.parse_expr();
 
   assert(expr.has_value());

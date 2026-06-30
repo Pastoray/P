@@ -1,7 +1,6 @@
 #include "parser.hpp"
 #include "tokenizer.hpp"
 #include "utils.hpp"
-#include "sema.hpp"
 
 #include <cassert>
 #include <memory>
@@ -10,9 +9,8 @@
 
 
 uint32_t Node::Ident::nid = 0;
-Parser::Parser(std::vector<Token>& tokens, Sema& sema)
+Parser::Parser(std::vector<Token>& tokens)
   : m_tokens(std::move(tokens)),
-    m_pre_sema(sema),
     m_index(0) {}
 
 std::vector<Node::Node> Parser::parse_prog()
@@ -66,23 +64,22 @@ bool Parser::is_right_assoc(const UnOp& unop)
   return true;
 }
 
-std::optional<UnOp> Parser::parse_un_op()
+std::optional<UnOp> Parser::parse_pref_un_op()
 {
   auto tok = peek();
   if (!tok.has_value() || !std::holds_alternative<TokenTypes::Symbol>(tok->type))
-    return std::nullopt;
+    return {};
 
-  else if (tok == TokenTypes::Symbol::AMP)
+  if (tok == TokenTypes::Symbol::AMP)
   {
     consume();
     return UnOp::ADDR_OF;
   }
-  else if (tok == TokenTypes::Symbol::AST)
+  if (tok == TokenTypes::Symbol::AST)
   {
     consume();
     return UnOp::DEREF;
   }
-
   if (tok == TokenTypes::Symbol::INC)
   {
     consume();
@@ -104,7 +101,25 @@ std::optional<UnOp> Parser::parse_un_op()
     return UnOp::NEG;
   }
   return {};
+}
 
+std::optional<UnOp> Parser::parse_suff_un_op()
+{
+  auto tok = peek();
+  if (!tok.has_value() || !std::holds_alternative<TokenTypes::Symbol>(tok->type))
+    return {};
+
+  if (tok == TokenTypes::Symbol::INC)
+  {
+    consume();
+    return UnOp::INC;
+  }
+  if (tok == TokenTypes::Symbol::DEC)
+  {
+    consume();
+    return UnOp::DEC;
+  }
+  return {};
 }
 
 std::optional<BinOp> Parser::parse_bin_op()
@@ -257,11 +272,11 @@ std::optional<BinOp> Parser::parse_bin_op()
 std::optional<Node::TypeRef> Parser::parse_type_ref()
 {
   auto tok = peek();
-  if (!tok.has_value() || !tok->value.has_value() || !m_pre_sema.is_type(tok->value.value()))
+  if (!tok.has_value() || !tok->value.has_value() || !m_tracker.is_type(tok->value.value()))
     return {};
 
   consume();
-  auto tp = std::make_shared<Type>(m_pre_sema.get_type(tok->value.value()));
+  auto tp = m_tracker.get_type(tok->value.value());
   for (; peek() && peek().value() == TokenTypes::Symbol::AST; consume())
     tp = std::make_shared<Type>(Type::Ptr(tp));
 
@@ -271,11 +286,11 @@ std::optional<Node::TypeRef> Parser::parse_type_ref()
 std::optional<Node::TypeDef> Parser::parse_type_def()
 {
   if (auto stc = parse_struct())
-    return Node::TypeDef(std::make_shared<Node::Struct>(stc.value()));
+    return Node::TypeDef(std::make_shared<Node::Struct>(stc.value()), m_tracker.get_type(stc.value().id.name));
   else if (auto uni = parse_union())
-    return Node::TypeDef(std::make_shared<Node::Union>(uni.value()));
+    return Node::TypeDef(std::make_shared<Node::Union>(uni.value()), m_tracker.get_type(uni.value().id.name));
   else if (auto enm = parse_enum())
-    return Node::TypeDef(std::make_shared<Node::Enum>(enm.value()));
+    return Node::TypeDef(std::make_shared<Node::Enum>(enm.value()), m_tracker.get_type(enm.value().id.name));
   return {};
 }
 
@@ -324,6 +339,25 @@ std::optional<std::variant<Node::TypeDef, Node::TypeRef>> Parser::parse_type()
   // return {};
 }
 
+std::optional<Node::Path> Parser::parse_lit_path()
+{
+  RollbackGuard guard(m_index);
+  std::vector<Node::Ident> res;
+  while (auto ident = parse_lit_ident())
+  {
+    res.push_back(ident.value());
+    if (peek() && peek() == TokenTypes::Symbol::NSR) consume();
+    else break;
+  }
+
+  // If it's 1 it couldve been parsed as a standalone ident
+  if (res.size() <= 1)
+    return {};
+
+  guard.commit();
+  return Node::Path(res);
+}
+
 std::optional<Node::Ident> Parser::parse_lit_ident()
 {
   if (peek() && *peek() == TokenTypes::Literal::IDENT)
@@ -369,7 +403,9 @@ std::optional<std::shared_ptr<Node::Lit>> Parser::parse_lit()
     return std::make_shared<Node::String>(*string);
   if (auto c = parse_lit_char())
     return std::make_shared<Node::Char>(*c);
-  else if (auto ident = parse_lit_ident())
+  if (auto path = parse_lit_path())
+    return std::make_shared<Node::Path>(*path);
+  if (auto ident = parse_lit_ident())
     return std::make_shared<Node::Ident>(*ident);
   return {};
 }
@@ -394,6 +430,7 @@ Parser::parse_expr(std::optional<std::shared_ptr<Node::Expr>> lhs, std::optional
   return lhs;
 }
 
+/*
 std::optional<std::shared_ptr<Node::Expr>>
 Parser::parse_un_expr()
 {
@@ -488,6 +525,7 @@ Parser::parse_un_expr()
 
   return lit;
 }
+*/
 
 std::optional<std::shared_ptr<Node::Expr>> Parser::parse_paren_expr()
 {
@@ -505,8 +543,229 @@ std::optional<std::shared_ptr<Node::Expr>> Parser::parse_paren_expr()
 std::optional<std::shared_ptr<Node::Expr>>
 Parser::parse_bin_expr(std::optional<std::shared_ptr<Node::Expr>> lhs, std::optional<BinOp> prev_op)
 {
+  /*
   const int prev_prec = (prev_op.has_value() ? precedence(prev_op.value()) : 0);
   std::optional<std::shared_ptr<Node::Expr>> rhs;
+  */
+
+  auto parse_paren_expr = [&]() -> std::optional<std::shared_ptr<Node::Expr>>
+  {
+    RollbackGuard guard(m_index);
+    if (!peek() || peek() != TokenTypes::Symbol::LPAR) return {};
+
+    consume();
+    auto expr = parse_expr();
+    if (!peek() || peek() != TokenTypes::Symbol::RPAR) return {};
+    consume();
+    guard.commit();
+    return expr;
+  };
+
+  auto precedence = [&](const std::variant<UnOp, BinOp>& op)
+  {
+    return std::visit(
+      Utils::overloaded
+      {
+        [&](const UnOp& uop) { return ::precedence(uop); },
+        [&](const BinOp& bop) { return ::precedence(bop); }
+      }, op
+    );
+  };
+
+  std::vector<UnOp> pref;
+  std::vector<std::variant<UnOp, BinOp>> suff;
+  std::vector<std::vector<std::shared_ptr<Node::Expr>>> post_exprs;
+  {
+    int cp = 0;
+    for (auto uop = parse_pref_un_op(); uop; cp = precedence(uop.value()), uop = parse_pref_un_op())
+    {
+      assert(cp <= precedence(uop.value()));
+      pref.emplace_back(uop.value());
+    }
+  }
+
+  std::shared_ptr<Node::Expr> node;
+  if (auto lit = parse_lit()) node = lit.value();
+  else if (auto pexpr = parse_paren_expr()) node = pexpr.value();
+  else
+  {
+    assert(pref.empty() && suff.empty() && !prev_op);
+    return {};
+  }
+
+  {
+    int cp = 1000;
+    while (true)
+    {
+      for (auto uop = parse_suff_un_op(); uop; cp = precedence(uop.value()), uop = parse_suff_un_op())
+      {
+        assert(cp >= precedence(uop.value()));
+        suff.emplace_back(uop.value());
+      }
+      if (peek() && peek() == TokenTypes::Symbol::LBRA)
+      {
+        consume();
+        auto expr = parse_expr();
+        assert(expr);
+        assert(cp >= precedence(BinOp::IDX));
+
+        suff.emplace_back(BinOp::IDX);
+        post_exprs.push_back({ expr.value() });
+
+        cp = precedence(BinOp::IDX);
+        consume();
+        continue;
+      }
+      if (peek() && peek() == TokenTypes::Symbol::LPAR)
+      {
+        consume();
+        auto expr = parse_expr();
+        assert(expr);
+        assert(cp >= precedence(BinOp::CALL));
+
+        suff.emplace_back(BinOp::CALL);
+        post_exprs.push_back({ expr.value() });
+
+        while (peek() && peek() == TokenTypes::Symbol::COM)
+        {
+          consume();
+          auto nexpr = parse_expr();
+          assert(nexpr);
+          post_exprs.back().push_back(nexpr.value());
+        }
+
+        cp = precedence(BinOp::CALL);
+        assert(peek() && peek() == TokenTypes::Symbol::RPAR);
+        consume();
+
+        continue;
+      }
+      break;
+    }
+
+  }
+
+  auto curr_midx = m_index;
+  auto curr_op = parse_bin_op();
+  if (!pref.empty() && prev_op) assert(precedence(pref.back()) > precedence(prev_op.value()));
+  if (!suff.empty() && curr_op) assert(precedence(suff[0]) > precedence(curr_op.value()));
+
+  std::reverse(suff.begin(), suff.end());
+  std::reverse(post_exprs.begin(), post_exprs.end());
+  while (!pref.empty() || !suff.empty())
+  {
+    auto p = pref.empty() ? 0 : precedence(pref.back());
+    auto s = suff.empty() ? 0 : precedence(suff.back());
+    if (p >= s)
+    {
+      if (curr_op && p < precedence(curr_op.value())) break;
+      node = std::make_shared<Node::UnExpr>(node, pref.back(), true);
+      pref.pop_back();
+    }
+    else
+    {
+      if (prev_op && s < precedence(prev_op.value())) break;
+      auto op = std::get_if<BinOp>(&suff.back());
+      if (op && *op == BinOp::CALL)
+      { node = std::make_shared<Node::Call>(node, post_exprs.back()); post_exprs.pop_back(); }
+      else if (op)
+      { node = std::make_shared<Node::BinExpr>(node, *op, post_exprs.back().back()); post_exprs.pop_back(); }
+      else node = std::make_shared<Node::UnExpr>(node, std::get<UnOp>(suff.back()), false);
+      suff.pop_back();
+    }
+  }
+  if (!prev_op && !curr_op) return node;
+
+  std::shared_ptr<Node::Expr> res;
+  if (!curr_op || (prev_op && precedence(prev_op.value()) >= precedence(curr_op.value())))
+  {
+    res = std::make_shared<Node::BinExpr>(lhs.value(), prev_op.value(), node);
+    for (; !suff.empty(); suff.pop_back())
+    {
+      auto op = std::get_if<BinOp>(&suff.back());
+      if (op && *op == BinOp::CALL)
+      { res = std::make_shared<Node::Call>(res, post_exprs.back()); post_exprs.pop_back(); }
+      else if (op)
+      { node = std::make_shared<Node::BinExpr>(res, *op, post_exprs.back().back()); post_exprs.pop_back(); }
+      else res = std::make_shared<Node::UnExpr>(res, std::get<UnOp>(suff.back()), false);
+    }
+
+    m_index = curr_midx;
+    return res;
+  }
+  
+  while (curr_op && (!prev_op || precedence(prev_op.value()) < precedence(curr_op.value())))
+  {
+    node = parse_bin_expr(node, curr_op).value();
+    for (; !pref.empty(); pref.pop_back())
+      node = std::make_shared<Node::UnExpr>(node, pref.back(), true);
+
+    curr_midx = m_index;
+    curr_op = parse_bin_op();
+  }
+
+  if (curr_op) m_index = curr_midx;
+ 
+  if (!lhs) res = node;
+  else res = std::make_shared<Node::BinExpr>(lhs.value(), prev_op.value(), node);
+  return res;
+
+  /*
+
+  auto top = std::make_shared<Node::UnExpr>(nullptr, UnOp::NOT, true);
+  std::shared_ptr<Node::Expr> prev = top;
+  for (auto&& [cur, uop] = std::pair{ top, parse_un_op() }; uop; uop = parse_un_op())
+  {
+    assert(cprec > precedence(uop.value()) && "Unexpected precedence chain");
+    cprec = precedence(uop.value());
+
+    prev = cur;
+    cur->expr = std::make_shared<Node::UnExpr>(cur->expr, UnOp::NOT, true);
+    cur->op = uop.value();
+    cur = std::static_pointer_cast<Node::UnExpr>(cur->expr);
+  }
+
+  auto lit = parse_lit();
+  if (!lit && peek() && peek() == TokenTypes::Symbol::LPAR) prev = parse_paren_expr().value();
+  else if (!lit)
+  {
+    if (!lhs && prev == top) return {};
+    else assert(false && "Expected expression");
+  }
+
+  if (auto ident = std::dynamic_pointer_cast<Node::Ident>(lit.value()) && peek() && peek() == TokenTypes::Symbol::LPAR)
+    prev = std::make_shared<Node::Call>(parse_call_expr().value());
+  else
+  {
+    auto vprev = std::static_pointer_cast<Node::UnExpr>(prev);
+    if (!vprev->expr) prev = lit.value();
+    else vprev->expr = lit.value();
+  }
+
+  std::shared_ptr<Node::Expr> res = lhs ? std::make_shared<Node::BinExpr>(lhs.value(), prev_op.value(), prev) : prev;
+  cprec = lhs ? precedence(prev_op.value()) : 1000;
+  while (auto uop = parse_un_op())
+  {
+    if (lhs && precedence(prev_op.value()) > precedence(uop.value()))
+    {
+      res = std::make_shared<Node::UnExpr>(res, uop.value(), false);
+      prev = res;
+    }
+    assert(cprec < precedence(uop.value()) && "Unexpected precedence chain");
+    cprec = precedence(uop.value());
+
+    prev = std::make_shared<Node::UnExpr>(prev, uop.value(), false);
+  }
+
+  auto bop = parse_bin_op();
+  if (!bop) return res;
+  else return parse_bin_expr(res, bop);
+  */
+
+
+  
+
+  /*
   if (auto p_expr = parse_paren_expr())
     rhs = p_expr.value();
 
@@ -561,21 +820,26 @@ Parser::parse_bin_expr(std::optional<std::shared_ptr<Node::Expr>> lhs, std::opti
     // ret = parse_un_expr(&ret);
     return ret;
   }
+  */
 }
 
+/*
 std::optional<Node::Call> Parser::parse_call_expr()
 {
-  if (!peek() || peek().value() != TokenTypes::Literal::IDENT || !peek(1) ||
-      peek(1).value() != TokenTypes::Symbol::LPAR)
-    return {};
+  if (!peek() || peek() != TokenTypes::Literal::IDENT) return {};
+  auto saved_midx = m_index;
 
   Node::Call call(*consume().value);
-  if (auto arg_list = parse_arg_list())
+  if (auto arg_list = parse_arg_list()) call.args = arg_list.value();
+  else
   {
-    call.args = arg_list.value();
+    m_index = saved_midx;
+    return {};
   }
+
   return call;
 }
+*/
 
 std::optional<Node::If> Parser::parse_if_stmt()
 {
@@ -661,6 +925,7 @@ std::optional<Node::Scope> Parser::parse_scope()
 
   consume();
   Node::Scope scope;
+  m_tracker.push_scope();
   while (peek().has_value() && peek().value() != TokenTypes::Symbol::RCUR)
   {
     if (auto stmt = parse_stmt())
@@ -672,49 +937,63 @@ std::optional<Node::Scope> Parser::parse_scope()
       scope.push_back(std::dynamic_pointer_cast<Node::Expr>(expr.value()));
       consume(); // ;
     }
+    else if (auto decl = parse_decl())
+    {
+      scope.push_back(decl.value());
+    }
     else
     {
       Utils::panic("Expected statements in scope");
       return {};
     }
   }
+  m_tracker.pop_scope();
   consume();
   return scope;
 }
 
 std::optional<std::vector<std::shared_ptr<Node::Expr>>> Parser::parse_arg_list()
 {
-  std::vector<std::shared_ptr<Node::Expr>> args;
+  RollbackGuard guard(m_index);
+  if (!peek() || peek() != TokenTypes::Symbol::LPAR) return {};
+
   consume();
+ 
+  std::vector<std::shared_ptr<Node::Expr>> args;
   while (auto expr = parse_expr())
   {
     args.emplace_back(expr.value());
-    if (peek() && peek().value() == TokenTypes::Symbol::COM)
-      consume();
+    if (peek() && peek() == TokenTypes::Symbol::COM) consume();
     else
       break;
   }
+  if (!peek() || peek() != TokenTypes::Symbol::RPAR) return {};
   consume();
+
+  guard.commit();
   return args;
 }
 
 std::optional<std::vector<Node::Param>> Parser::parse_param_list()
 {
+  RollbackGuard guard(m_index);
   std::vector<Node::Param> params;
-  consume();
-  while (true)
-  {
-    if (auto type = parse_type_ref())
-    {
-      std::string name_str = *consume().value;
+  if (!peek() || peek() != TokenTypes::Symbol::LPAR) return {};
 
-      params.emplace_back(*type, std::move(name_str));
-      if (peek() && peek().value() == TokenTypes::Symbol::COM) consume();
-      else break;
-    }
+  consume();
+  while (auto type = parse_type_ref())
+  {
+    std::string name_str = *consume().value;
+
+    params.emplace_back(*type, std::move(name_str));
+    if (peek() && peek().value() == TokenTypes::Symbol::COM) consume();
     else break;
   }
+
+  if (!peek() || peek() != TokenTypes::Symbol::RPAR) return {};
   consume();
+
+  guard.commit();
   return params;
 }
 
@@ -728,16 +1007,19 @@ std::optional<Node::Struct> Parser::parse_struct()
   auto idt = parse_lit_ident();
   assert(idt.has_value());
   Node::Struct struct_node(idt.value());
-  m_pre_sema.register_struct_t(struct_node);
+  auto type = std::make_shared<Type>(Type::Struct(struct_node.id.name));
+  auto& stype = std::get<Type::Struct>(type->type);
+  m_tracker.push_type(struct_node.id.name, type);
   consume(); // {
   while (peek() && peek().value() != TokenTypes::Symbol::RCUR)
   {
     if (auto tp = parse_type())
     {
       assert(peek() && peek() == TokenTypes::Literal::IDENT);
-      struct_node.members.emplace_back(
-        tp.value(), Node::Ident(consume().value.value())
-      );
+      auto mem = Node::Ident(consume().value.value());
+      struct_node.members.emplace_back(tp.value(), mem);
+      // stype.insert_mem(Node::get_res_t(tp.value()), mem.name);
+      
       assert(peek() && peek() == TokenTypes::Symbol::SEMICOL);
       consume(); // ;
     }
@@ -762,7 +1044,7 @@ std::optional<Node::Struct> Parser::parse_struct()
   }
   consume(); // }
   // consume(); // ;
-  m_pre_sema.register_struct_t(struct_node);
+  // m_pre_sema.register_struct_t(struct_node);
   return struct_node;
 }
 
@@ -776,7 +1058,8 @@ std::optional<Node::Union> Parser::parse_union()
   auto idt = parse_lit_ident();
   assert(idt.has_value());
   Node::Union union_node(idt.value());
-  m_pre_sema.register_union_t(union_node);
+  auto type = std::make_shared<Type>(Type::Union(union_node.id.name));
+  m_tracker.push_type(union_node.id.name, type);
   consume(); // {
   while (peek() && peek().value() != TokenTypes::Symbol::RCUR)
   {
@@ -809,8 +1092,27 @@ std::optional<Node::Union> Parser::parse_union()
   }
   consume(); // }
   // consume(); // ;
-  m_pre_sema.register_union_t(union_node);
+  // m_pre_sema.register_union_t(union_node);
   return union_node;
+}
+
+std::optional<Node::Namespace> Parser::parse_namespace()
+{
+  if (!peek() || peek() != TokenTypes::Keyword::NAMEPSACE)
+    return {};
+
+  consume();
+
+  auto idt = parse_lit_ident();
+  assert(idt.has_value());
+  Node::Namespace ns_node(idt.value());
+
+  if (auto scp = parse_scope())
+    ns_node.scp = scp.value();
+  else
+    assert(false && "Namespace scope is not optional");
+
+  return ns_node;
 }
 
 std::optional<Node::Enum> Parser::parse_enum()
@@ -866,50 +1168,60 @@ std::optional<Node::Enum> Parser::parse_enum()
   }
   consume(); // }
   // consume(); // ;
+  
 
-  m_pre_sema.register_enum_t(enm);
+  auto type = std::make_shared<Type>(Type::Enum(enm.id.name));
+  m_tracker.push_type(enm.id.name, type);
+  // m_pre_sema.register_enum_t(enm);
   return enm;
 }
 
 std::optional<Node::Func> Parser::parse_func()
 {
+  RollbackGuard guard(m_index);
   if (!peek() || peek().value() != TokenTypes::Keyword::FN)
     return {};
 
   consume();
   std::string name;
-  if (peek() && peek().value() == TokenTypes::Literal::IDENT)
-  {
-    name = *peek()->value;
-    consume();
-  }
+  if (!peek() || peek() != TokenTypes::Literal::IDENT)
+    return {};
+
+  name = *consume().value;
 
   auto ident = Node::Ident(name);
   std::vector<Node::Param> params;
   auto ret_t = Node::TypeRef(std::make_shared<Type>(Type::Base::VOID));
   if (auto param_list = parse_param_list())
     params = param_list.value();
+  else
+    return {};
 
   // RARROW (->)
   if (peek() && peek().value() == TokenTypes::Symbol::ARROW)
   {
     consume();
     const auto type = parse_type_ref();
-    assert(type.has_value());
+    if (!type)
+      return {};
+
     ret_t = *type;
   }
+  else return {};
 
   Node::Func func(std::move(ident), ret_t);
   func.params = params;
   if (peek() && peek().value() == TokenTypes::Symbol::SEMICOL)
   {
     consume();
+    guard.commit();
     return func;
   }
 
   if (auto scope = parse_scope())
     func.scope = scope.value();
 
+  guard.commit();
   return func;
 }
 
@@ -949,12 +1261,17 @@ std::optional<std::shared_ptr<Node::Decl>> Parser::parse_decl()
 {
   if (peek() && peek().value() == TokenTypes::Keyword::FN)
     return std::make_shared<Node::Func>(parse_func().value());
+  // Redundant; parsed in parse_type_def
+  /*
   else if (peek() && peek().value() == TokenTypes::Keyword::STRUCT)
     return std::make_shared<Node::Struct>(parse_struct().value());
   else if (peek() && peek().value() == TokenTypes::Keyword::UNION)
     return std::make_shared<Node::Union>(parse_union().value());
   else if (peek() && peek().value() == TokenTypes::Keyword::ENUM)
     return std::make_shared<Node::Enum>(parse_enum().value());
+  */
+  else if (peek() && peek().value() == TokenTypes::Keyword::NAMEPSACE)
+    return std::make_shared<Node::Namespace>(parse_namespace().value());
   return {};
 }
 
@@ -976,6 +1293,7 @@ void Parser::parse_arr(std::variant<Node::TypeDef, Node::TypeRef>& type)
     {
       [this](Node::TypeDef& td) -> std::shared_ptr<Type>
       {
+        /*
         auto ret = std::visit(
           Utils::overloaded
           {
@@ -984,7 +1302,8 @@ void Parser::parse_arr(std::variant<Node::TypeDef, Node::TypeRef>& type)
             [this](const std::shared_ptr<Node::Enum>& enm) -> Type { return m_pre_sema.get_type(enm->id.name); },
           }, td.type
         );
-        return std::make_shared<Type>(ret);
+        */
+        return td.res_t;
       },
       [](Node::TypeRef& tr) -> std::shared_ptr<Type> { return tr.res_t; }
     }, type
@@ -1030,14 +1349,11 @@ void Parser::parse_arr(std::shared_ptr<Type>& type)
 
 std::optional<Node::Asgn> Parser::parse_asgn_stmt()
 {
-  int cur = m_index;
+  RollbackGuard guard(m_index);
   if (auto t = parse_type())
   {
     if (!peek() || peek() != TokenTypes::Literal::IDENT)
-    {
-      m_index = cur;
       return {};
-    }
 
     auto ident = consume();
     if (peek() == TokenTypes::Symbol::LBRA)
@@ -1049,6 +1365,7 @@ std::optional<Node::Asgn> Parser::parse_asgn_stmt()
       if (auto expr = parse_expr())
       {
         consume(); // ;
+        guard.commit();
         return Node::Asgn(t.value(), ident.value.value(), expr.value());
       }
       else if (auto decl = parse_decl())
@@ -1062,6 +1379,7 @@ std::optional<Node::Asgn> Parser::parse_asgn_stmt()
     else
     {
       consume(); // ;
+      guard.commit();
       return Node::Asgn(t.value(), ident.value.value());
     }
   }

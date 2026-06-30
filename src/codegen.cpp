@@ -1653,7 +1653,7 @@ void CodeGen::gen_call(IR::Call& call)
   }
 
   // m_text << temp.str();
-  m_text << "call " << call.callable << "\n\t";
+  m_text << "call " << format_operand(call.callable) << "\n\t";
   m_text << "movq -1024(%rbp), %rsp\n\t";
 
   for (auto& regs : assigned_regs)

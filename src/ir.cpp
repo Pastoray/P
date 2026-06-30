@@ -23,6 +23,8 @@ void IRGen::Visitor::visit(const Node::Union& un) { m_gen.gen_union(un); }
 
 void IRGen::Visitor::visit(const Node::Enum& en) { m_gen.gen_enum(en); }
 
+void IRGen::Visitor::visit(const Node::Namespace& ns) { m_gen.gen_namespace(ns); }
+
 void IRGen::Visitor::visit(const Node::BinExpr& bin_expr) { m_gen.gen_bin_expr(bin_expr); }
 
 void IRGen::Visitor::visit(const Node::UnExpr& un_expr) { m_gen.gen_un_expr(un_expr); }
@@ -30,6 +32,8 @@ void IRGen::Visitor::visit(const Node::UnExpr& un_expr) { m_gen.gen_un_expr(un_e
 // void IRGen::Visitor::visit(const Node::MemberExpr& mem_expr) { m_gen.gen_mem_expr(mem_expr); };
 
 void IRGen::Visitor::visit(const Node::Ident& ident) { m_gen.gen_ident(ident); }
+
+void IRGen::Visitor::visit(const Node::Path& path) { m_gen.gen_path(path); }
 
 void IRGen::Visitor::visit(const Node::Int& int_) { m_gen.gen_int(int_); }
 
@@ -107,8 +111,9 @@ void IRGen::gen_fn(const Node::Func& func)
 {
   if (!func.scope.has_value())
   {
-    IR::Label fn_lab = IR::Label::create_code(func.id.name);
     auto sym = m_anl.sym_table.at(func.id.id);
+    auto* ext = std::get_if<Sema::Symbol::FnExt>(&sym.ext);
+    IR::Label fn_lab = IR::Label::create_code(ext->mang_name, sym.type);
     aid_to_l.try_emplace(sym.id, fn_lab);
     return;
   }
@@ -125,8 +130,9 @@ void IRGen::gen_fn(const Node::Func& func)
   IR::Label end_lab = new_label(0);
   */
 
-  IR::Label fn_lab = IR::Label::create_code(func.id.name);
   auto sym = m_anl.sym_table.at(func.id.id);
+  auto* ext = std::get_if<Sema::Symbol::FnExt>(&sym.ext);
+  IR::Label fn_lab = IR::Label::create_code(ext->mang_name, sym.type);
   aid_to_l.try_emplace(sym.id, fn_lab);
   // IR::Label end_lab = IR::Label::create_code(func.id.name + "_end");
   IR::Label end_lab = IR::Label::create_code();
@@ -191,6 +197,11 @@ void IRGen::gen_enum(const Node::Enum&)
   // Noop
 }
 
+void IRGen::gen_namespace(const Node::Namespace& ns)
+{
+  gen_scope(ns.scp);
+}
+
 void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
 {
   bin_expr.lhs->accept(m_visitor);
@@ -207,7 +218,11 @@ void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
     m_stack.push(lhs);
   }
 
-  if (bin_expr.op != BinOp::DOT && bin_expr.op != BinOp::ARROW && bin_expr.op != BinOp::ASG) match_types();
+  if (
+    bin_expr.op != BinOp::DOT &&
+    bin_expr.op != BinOp::ARROW &&
+    bin_expr.op != BinOp::ASG
+  ) match_types();
 
   IR::Operand lhs_oper = m_stack.top();
   m_stack.pop();
@@ -704,6 +719,11 @@ void IRGen::gen_un_expr(const Node::UnExpr& un_expr)
   }
 }
 
+void IRGen::gen_path(const Node::Path& path)
+{
+  gen_ident(path.path.back());
+}
+
 void IRGen::gen_ident(const Node::Ident& ident)
 {
   auto key = m_anl.sym_table.at(ident.id).id;
@@ -843,7 +863,7 @@ void IRGen::gen_asgn(const Node::Asgn& asgn)
             auto top = m_stack.top();
             if (ext->is_global)
             {
-              auto lbl = IR::Label::create_bss(asgn.id.name, IR::get_type(top));
+              auto lbl = IR::Label::create_bss(ext->mang_name, IR::get_type(top));
               m_instructs->emplace_back(IR::GStore(lbl, top));
               aid_to_l.try_emplace(sym.id, lbl);
             }
@@ -1030,6 +1050,33 @@ void IRGen::gen_ret(const Node::Ret& ret_)
 
 void IRGen::gen_call(const Node::Call& call)
 {
+  call.callable->accept(m_visitor);
+  auto lhs = m_stack.top();
+  m_stack.pop();
+
+  auto lhs_t = IR::get_type(lhs);
+  assert(lhs_t.is_func_t());
+  auto fn_t = std::get<Type::Func>(lhs_t.type);
+  IR::Reg ret_reg(*fn_t.ret);
+  IR::Call ir_call(lhs, ret_reg);
+  for (int i = 0; i < call.args.size(); i++)
+  {
+    auto& expr = call.args[i];
+    expr->accept(m_visitor);
+    auto top = m_stack.top();
+    m_stack.pop();
+
+    if (IR::get_type(top) != *fn_t.params[i])
+    {
+      coerce(top, *fn_t.params[i]);
+      top = m_stack.top();
+      m_stack.pop();
+    }
+    ir_call.args.emplace_back(top);
+  }
+  m_stack.emplace(ret_reg);
+  m_instructs->emplace_back(ir_call);
+  /*
   auto sym = m_anl.sym_table.at(call.callable.id);
   assert(sym.is_fn());
   auto ext = std::get<Sema::Symbol::FnExt>(sym.ext);
@@ -1054,6 +1101,7 @@ void IRGen::gen_call(const Node::Call& call)
   }
   m_stack.emplace(ret_reg);
   m_instructs->emplace_back(ir_call);
+  */
 }
 
 void IRGen::gen_scope(const Node::Scope& scope)

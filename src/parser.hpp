@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <memory>
 #include <optional>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -13,7 +14,46 @@
 #include "type.hpp"
 #include "utils.hpp"
 
-class Sema;
+struct ScopeTracker
+{
+  struct LightScope
+  {
+    std::unordered_map<std::string, std::shared_ptr<Type>> types;
+  };
+  std::vector<LightScope> scopes;
+  ScopeTracker() { scopes.emplace_back(); }
+
+  void push_scope()
+  {
+    scopes.emplace_back();
+  }
+
+  void pop_scope()
+  {
+    scopes.pop_back();
+  }
+
+  void push_type(const std::string& name, std::shared_ptr<Type>& type)
+  {
+    scopes.back().types.try_emplace(name, type);
+  }
+
+  bool is_type(const std::string& name)
+  {
+    if (auto bt = Type::string_to_base_t(name)) return true;
+    for (size_t i = scopes.size(); i > 0; i--)
+      if (scopes[i - 1].types.count(name)) return true;
+    return false;
+  }
+
+  std::shared_ptr<Type> get_type(const std::string& name)
+  {
+    if (auto bt = Type::string_to_base_t(name)) return std::make_shared<Type>(bt.value());
+    for (size_t i = scopes.size(); i > 0; i--)
+      if (scopes[i - 1].types.count(name)) return scopes[i - 1].types.at(name);
+    return nullptr;
+  }
+};
 
 class Parser;
 
@@ -36,12 +76,14 @@ namespace Node
   struct String;
   struct Char;
   struct Call;
+  struct Path;
   struct ExprVisitor
   {
     virtual ~ExprVisitor() = default;
     virtual void visit(const UnExpr& un_expr) = 0;
     virtual void visit(const BinExpr& bin_expr) = 0;
     virtual void visit(const Ident& ident) = 0;
+    virtual void visit(const Path& path) = 0;
     virtual void visit(const Int& int_) = 0;
     virtual void visit(const Float& float_) = 0;
     virtual void visit(const String& string) = 0;
@@ -177,6 +219,22 @@ namespace Node
     }
   };
 
+  struct Path : Lit
+  {
+    explicit Path(std::vector<Ident> p) : path(std::move(p)) {}
+    void accept(ExprVisitor& v) override { v.visit(*this); }
+    void dump(int ident) const override
+    {
+      std::cout << std::string(ident, '\t') << "Node::Path {\n";
+      std::cout << std::string(ident + 1, '\t') << "path: ";
+      for (size_t i = 0; i < path.size(); i++)
+        std::cout << path[i].name << (i == path.size() - 1 ? std::string("") : std::string("::"));
+      std::cout << '\n';
+      std::cout << std::string(ident, '\t') << "}\n";
+    }
+    std::vector<Ident> path;
+  };
+
   struct UnExpr : Expr
   {
     explicit UnExpr(std::shared_ptr<Expr> expr, UnOp op, bool pref) : expr(std::move(expr)), op(op), pref(pref) {};
@@ -230,25 +288,30 @@ namespace Node
 
   struct Call : Expr
   {
-    explicit Call(std::string callable) : callable(std::move(callable))
-    {
-    }
+    explicit Call(std::shared_ptr<Expr> callable) : callable(std::move(callable)) {}
+    explicit Call(std::shared_ptr<Expr> callable, std::vector<std::shared_ptr<Expr>> args)
+      : callable(std::move(callable)), args(std::move(args)) {}
+
     void accept(ExprVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override
     {
       std::cout << std::string(ident, '\t') << "Node::Call {\n";
-      std::cout << std::string(ident + 1, '\t') << "callable: " << callable.id << '\n';
+      std::cout << std::string(ident + 1, '\t') << "callable: " << '\n';
+      callable->dump(ident + 1);
       std::cout << std::string(ident, '\t') << "}\n";
     }
 
-    Ident callable;
+    std::shared_ptr<Expr> callable;
     std::vector<std::shared_ptr<Expr>> args;
   };
 
   struct Scope
   {
-    std::vector<std::variant<std::shared_ptr<Expr>, std::shared_ptr<Stmt>,
-                             std::shared_ptr<Decl>>> terms;
+    std::vector<std::variant<
+      std::shared_ptr<Expr>,
+      std::shared_ptr<Stmt>,
+      std::shared_ptr<Decl>
+    >> terms;
 
     void push_back(std::shared_ptr<Stmt> stmt)
     {
@@ -270,7 +333,7 @@ namespace Node
   {
     explicit TypeRef() : res_t(nullptr) {}
     explicit TypeRef(std::shared_ptr<Type> type) : res_t(std::move(type)) {}
-    mutable std::shared_ptr<Type> res_t;
+    std::shared_ptr<Type> res_t;
 
     void accept(StmtVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override {}
@@ -286,15 +349,15 @@ namespace Node
         std::shared_ptr<Struct>,
         std::shared_ptr<Union>,
         std::shared_ptr<Enum>
-      > type
-    ) : type(std::move(type)), res_t(nullptr) {}
+      > type, std::shared_ptr<Type> res_t
+    ) : type(std::move(type)), res_t(std::move(res_t)) {}
 
     std::variant<
       std::shared_ptr<Struct>,
       std::shared_ptr<Union>,
       std::shared_ptr<Enum>
     > type;
-    mutable std::shared_ptr<Type> res_t;
+    std::shared_ptr<Type> res_t;
 
     void accept(StmtVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override {}
@@ -315,6 +378,7 @@ namespace Node
   struct Struct;
   struct Union;
   struct Enum;
+  struct Namespace;
   struct DeclVisitor
   {
     virtual ~DeclVisitor() = default;
@@ -322,6 +386,7 @@ namespace Node
     virtual void visit(const Struct& strct) = 0;
     virtual void visit(const Union& un) = 0;
     virtual void visit(const Enum& en) = 0;
+    virtual void visit(const Namespace& ns) = 0;
   };
 
   struct Param : Ident
@@ -407,6 +472,35 @@ namespace Node
     Ident id;
     // std::optional<Scope> scp;
     std::vector<std::pair<std::variant<TypeDef, TypeRef>, Ident>> members;
+  };
+
+  struct Namespace : Decl
+  {
+    explicit Namespace(Ident id) : id(std::move(id)) {}
+    void accept(DeclVisitor& v) override { v.visit(*this); }
+    void dump(int ident) const override
+    {
+      std::cout << std::string(ident, '\t') << "Node::Namespace: " << id.name << " {\n";
+      std::cout << std::string(ident + 1, '\t') << "scp: \n";
+      for (auto& term : scp.terms)
+        std::visit(
+          Utils::overloaded
+          {
+            [&](const std::shared_ptr<Expr>& expr) { expr->dump(ident + 2); },
+            [&](const std::shared_ptr<Stmt>& stmt) { stmt->dump(ident + 2); },
+            [&](const std::shared_ptr<Decl>& decl) { decl->dump(ident + 2); },
+          }, term
+        );
+      /*
+      for (const auto& [type, member_id] : members)
+      {
+        std::cout << std::string(ident + 1, '\t') << member_id.name << "\n";
+      }
+      */
+      std::cout << std::string(ident, '\t') << "}\n";
+    }
+    Ident id;
+    Scope scp;
   };
 
   struct Asgn : Stmt
@@ -596,24 +690,44 @@ namespace Node
     std::optional<std::shared_ptr<Expr>> ret_val;
   };
 
-  using Node = std::variant<std::shared_ptr<Stmt>, std::shared_ptr<Expr>,
-                            std::shared_ptr<Decl>>;
-
+  using Node = std::variant<std::shared_ptr<Stmt>, std::shared_ptr<Expr>, std::shared_ptr<Decl>>;
 }
 
 class Parser
 {
+private:
+  class RollbackGuard
+  {
+  private:
+    size_t& m_parser_idx;
+    size_t m_saved_idx;
+    bool m_committed;
+
+  public:
+    explicit RollbackGuard(size_t& parser_idx)
+      : m_parser_idx(parser_idx), m_saved_idx(parser_idx), m_committed(false) {}
+
+    void commit() noexcept { m_committed = true; }
+
+    ~RollbackGuard() { if (!m_committed) m_parser_idx = m_saved_idx; }
+    
+    RollbackGuard(const RollbackGuard&) = delete;
+    RollbackGuard& operator=(const RollbackGuard&) = delete;
+  };
+
 public:
-  explicit Parser(std::vector<Token>& tokens, Sema& sema);
+  explicit Parser(std::vector<Token>& tokens);
   std::vector<Node::Node> parse_prog();
   std::optional<UnOp> parse_un_op();
+  std::optional<UnOp> parse_pref_un_op();
+  std::optional<UnOp> parse_suff_un_op();
   std::optional<BinOp> parse_bin_op();
 
   bool is_right_assoc(const BinOp& binop);
   bool is_right_assoc(const UnOp& unop);
   std::optional<std::shared_ptr<Node::Expr>> parse_paren_expr();
   std::optional<std::shared_ptr<Node::Expr>> parse_bin_expr(std::optional<std::shared_ptr<Node::Expr>> lhs, std::optional<BinOp> prev_op);
-  std::optional<std::shared_ptr<Node::Expr>> parse_un_expr();
+  // std::optional<std::shared_ptr<Node::Expr>> parse_un_expr();
   std::optional<std::shared_ptr<Node::Expr>>
     parse_expr(std::optional<std::shared_ptr<Node::Expr>> lhs = std::nullopt, std::optional<BinOp> prev_op = std::nullopt);
 
@@ -624,11 +738,13 @@ public:
   std::optional<Node::Union> parse_union();
   std::optional<Node::Enum> parse_enum();
   std::optional<Node::Func> parse_func();
+  std::optional<Node::Namespace> parse_namespace();
 
   std::optional<Node::Int> parse_lit_int();
   std::optional<Node::Float> parse_lit_float();
   std::optional<Node::String> parse_lit_string();
   std::optional<Node::Char> parse_lit_char();
+  std::optional<Node::Path> parse_lit_path();
   std::optional<Node::Ident> parse_lit_ident();
   std::optional<std::shared_ptr<Node::Lit>> parse_lit();
   std::optional<std::shared_ptr<Node::Decl>> parse_decl();
@@ -641,7 +757,7 @@ public:
   std::optional<Node::Ret> parse_ret_stmt();
   std::optional<std::vector<Node::Param>> parse_param_list();
   std::optional<std::vector<std::shared_ptr<Node::Expr>>> parse_arg_list();
-  std::optional<Node::Call> parse_call_expr();
+  // std::optional<Node::Call> parse_call_expr();
   std::optional<Node::Node> parse_node();
   std::optional<Node::TypeRef> parse_type_ref();
   std::optional<Node::TypeDef> parse_type_def();
@@ -680,8 +796,8 @@ private:
 
 private:
   const std::vector<Token> m_tokens;
-  Sema& m_pre_sema;
-  uint16_t m_index;
+  ScopeTracker m_tracker;
+  size_t m_index;
 };
 
 #endif // PARSER_H

@@ -43,6 +43,7 @@ class Sema
 public:
   struct Symbol;
   struct VarExt;
+  struct Scope;
 
   struct Symbol
   {
@@ -50,9 +51,18 @@ public:
     {
       std::string mang_name;
       std::vector<Symbol> params;
-      FnExt(const std::string& mname, const std::vector<Node::Param>& prms);
+      FnExt(std::string mname, const std::vector<Node::Param>& prms) : mang_name(std::move(mname))
+      {
+        for (auto& prm : prms)
+          params.emplace_back(*prm.type.res_t, VarExt());
+      }
     };
 
+    struct NsExt
+    {
+      uint32_t scp_id;
+      explicit NsExt(uint32_t id) : scp_id(id) {}
+    };
     struct StcExt {};
     struct UniExt {};
     struct EnuExt {};
@@ -61,12 +71,13 @@ public:
     {
       bool is_const = false;
       bool is_global = false;
+      std::string mang_name;
       explicit VarExt() = default;
-      explicit VarExt(bool is_g) : is_global(is_g) {};
+      explicit VarExt(std::string mname, bool is_g) : is_global(is_g), mang_name(std::move(mname)) {};
     };
 
     static uint32_t nid;
-    using Ext = std::variant<FnExt, StcExt, UniExt, EnuExt, VarExt>;
+    using Ext = std::variant<FnExt, StcExt, UniExt, EnuExt, VarExt, NsExt>;
     uint32_t id;
     Type type;
     Ext ext;
@@ -76,6 +87,7 @@ public:
     [[nodiscard]] bool is_un() const { return std::holds_alternative<UniExt>(ext); }
     [[nodiscard]] bool is_en() const { return std::holds_alternative<EnuExt>(ext); }
     [[nodiscard]] bool is_vr() const { return std::holds_alternative<VarExt>(ext); }
+    [[nodiscard]] bool is_ns() const { return std::holds_alternative<NsExt>(ext); }
   };
 
   enum class ValCat
@@ -117,11 +129,13 @@ public:
   void push_scope();
   void pop_scope();
 
+  /*
   void register_struct_t(const Node::Struct& strct);
   void register_union_t(const Node::Union& un);
   void register_enum_t(const Node::Enum& en);
   bool is_type(const std::string& name);
   Type get_type(const std::string& name);
+  */
 
   explicit Sema(const std::vector<Node::Node>&);
   ~Sema();
@@ -140,10 +154,12 @@ public:
   void analyze_struct(const Node::Struct&);
   void analyze_union(const Node::Union&);
   void analyze_enum(const Node::Enum&);
+  void analyze_namespace(const Node::Namespace&);
 
   ExprInfo analyze_bin_expr(Node::BinExpr&);
   ExprInfo analyze_un_expr(const Node::UnExpr&);
   ExprInfo analyze_ident(const Node::Ident&);
+  ExprInfo analyze_path(const Node::Path&);
   ExprInfo analyze_int(const Node::Int&);
   ExprInfo analyze_float(const Node::Float&);
   ExprInfo analyze_string(const Node::String&);
@@ -166,15 +182,11 @@ private:
 private:
   Sema::Analysis g_anl;
   // Visitor m_visitor;
-  std::vector<std::unique_ptr<Scope>> m_scope_stack;
+  std::vector<uint32_t> m_scope_stack;
+  std::vector<std::unique_ptr<Scope>> m_scope_arena;
+  std::vector<std::string> m_mang_pref;
   std::unordered_map<std::string, Type> g_pre_sema;
   const std::vector<Node::Node>& m_nodes;
-};
-
-inline Sema::Symbol::FnExt::FnExt(const std::string& mname, const std::vector<Node::Param>& prms) : mang_name(mname)
-{
-  for (auto& prm : prms)
-    params.emplace_back(*prm.type.res_t, VarExt());
 };
 
 #endif // SEMA_H

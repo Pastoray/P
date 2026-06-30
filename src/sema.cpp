@@ -13,8 +13,8 @@
 uint32_t Sema::Symbol::nid = 0;
 Sema::Sema(const std::vector<Node::Node>& nodes) : m_nodes(nodes)
 {
-  auto global_scope = std::make_unique<Scope>();
-  m_scope_stack.push_back(std::move(global_scope));
+  m_scope_stack.push_back(m_scope_arena.size());
+  m_scope_arena.push_back(std::make_unique<Scope>());
 }
 
 Sema::~Sema()
@@ -162,6 +162,36 @@ Sema::ExprInfo Sema::analyze_bin_expr(Node::BinExpr& bin_expr)
     }
     else assert(false);
   }
+  /*
+  else if (bin_expr.op == BinOp::NSR)
+  {
+    auto lhs = std::dynamic_pointer_cast<Node::Ident>(bin_expr.lhs);
+    if (lhs == nullptr)
+    {
+      std::cout << "ERROR" << std::endl;
+      bin_expr.dump(0);
+    }
+    assert(lhs != nullptr);
+    Sema::Symbol* ctx = nullptr;
+    for (int i = m_scope_stack.size() - 1; i >= 0; i--)
+    {
+      auto& cs = m_scope_arena[m_scope_stack[i]];
+      if (cs->m_sym_table.find(lhs->name) != cs->m_sym_table.end() && cs->m_sym_table.at(lhs->name).is_ns())
+        ctx = &cs->m_sym_table.at(lhs->name);
+    }
+
+    assert(ctx && ctx->is_ns());
+    auto ctx_ext = std::get<Sema::Symbol::NsExt>(ctx->ext);
+
+    auto prev_scopes = m_scope_stack;
+    m_scope_stack.clear();
+    m_scope_stack.push_back(ctx_ext.scp_id);
+    auto rhs_expri = analyze_expr(bin_expr.rhs);
+    m_scope_stack.pop_back();
+    m_scope_stack = prev_scopes;
+    return rhs_expri;
+  }
+  */
 
   auto rhs_expri = analyze_expr(bin_expr.rhs);
   // assert(lhs_expri.type == rhs_expri.type && "Undefined operations between different types");
@@ -187,23 +217,31 @@ Sema::ExprInfo Sema::analyze_un_expr(const Node::UnExpr& un_expr)
 
 Sema::ExprInfo Sema::analyze_call(const Node::Call& call)
 {
+  auto info = analyze_expr(call.callable);
+  assert(info.type.is_func_t());
+
+  for (auto& arg : call.args)
+    analyze_expr(arg);
+  return Sema::ExprInfo(info.type, ValCat::RVALUE);
+
+  /*
   bool found = false;
   for (int32_t i = (int32_t)m_scope_stack.size() - 1; i >= 0; i--)
   {
     found = (
-      m_scope_stack[i]->m_sym_table.find(call.callable.name) != m_scope_stack[i]->m_sym_table.end() &&
-      m_scope_stack[i]->m_sym_table.at(call.callable.name).is_fn()
+      m_scope_arena[m_scope_stack[i]]->m_sym_table.find(call.callable.name) !=
+      m_scope_arena[m_scope_stack[i]]->m_sym_table.end() &&
+      m_scope_arena[m_scope_stack[i]]->m_sym_table.at(call.callable.name).is_fn()
     );
     if (found)
     {
       assert(g_anl.sym_table.find(call.callable.id) == g_anl.sym_table.end());
-      g_anl.sym_table.try_emplace(call.callable.id, m_scope_stack[i]->m_sym_table.at(call.callable.name));
-      for (auto& arg : call.args)
-        analyze_expr(arg);
-      return Sema::ExprInfo(m_scope_stack[i]->m_sym_table.at(call.callable.name).type, ValCat::RVALUE);
+      g_anl.sym_table.try_emplace(call.callable.id, m_scope_arena[m_scope_stack[i]]->m_sym_table.at(call.callable.name));
     }
+    
   }
-  Utils::panic("Function '" + call.callable.name + "' does not exist");
+  */
+  // Utils::panic("Function '" + call.callable.name + "' does not exist");
 }
 
 Sema::ExprInfo Sema::analyze_expr(const std::shared_ptr<Node::Expr>& expr)
@@ -219,13 +257,55 @@ Sema::ExprInfo Sema::analyze_expr(const std::shared_ptr<Node::Expr>& expr)
   Utils::panic("Unexpected analyze expression");
 }
 
+Sema::ExprInfo Sema::analyze_path(const Node::Path& path)
+{
+  int scpid = -1;
+  for (int32_t i = (int32_t)m_scope_stack.size() - 1; i >= 0; i--)
+    if (
+      auto it = m_scope_arena[m_scope_stack[i]]->m_sym_table.find(path.path[0].name);
+      it != m_scope_arena[m_scope_stack[i]]->m_sym_table.end() && it->second.is_ns()
+    )
+    {
+      auto sym = m_scope_arena[m_scope_stack[i]]->m_sym_table.at(path.path[i].name);
+      auto ext = std::get<Sema::Symbol::NsExt>(sym.ext);
+      scpid = ext.scp_id;
+      break;
+    }
+  
+  assert(scpid != -1);
+  for (size_t i = 1; i < path.path.size(); i++)
+  {
+    if (
+      auto it = m_scope_arena[scpid]->m_sym_table.find(path.path[i].name);
+      it != m_scope_arena[scpid]->m_sym_table.end()
+    )
+    {
+      auto sym = m_scope_arena[scpid]->m_sym_table.at(path.path[i].name);
+      if (sym.is_ns())
+      {
+        assert(i != path.path.size() - 1);
+        auto ext = std::get<Sema::Symbol::NsExt>(sym.ext);
+        scpid = ext.scp_id;
+      }
+      else
+      {
+        assert(i == path.path.size() - 1);
+        g_anl.sym_table.try_emplace(path.path[i].id, m_scope_arena[scpid]->m_sym_table.at(path.path[i].name));
+        return ExprInfo(sym.type, ValCat::LVALUE);
+      }
+    }
+    else assert(false);
+  }
+  assert(false);
+}
+
 Sema::ExprInfo Sema::analyze_ident(const Node::Ident& ident)
 {
   for (int32_t i = (int32_t)m_scope_stack.size() - 1; i >= 0; i--)
-    if (m_scope_stack[i]->m_sym_table.find(ident.name) != m_scope_stack[i]->m_sym_table.end())
+    if (m_scope_arena[m_scope_stack[i]]->m_sym_table.find(ident.name) != m_scope_arena[m_scope_stack[i]]->m_sym_table.end())
     {
-      g_anl.sym_table.try_emplace(ident.id, m_scope_stack[i]->m_sym_table.at(ident.name));
-      return ExprInfo(m_scope_stack[i]->m_sym_table.at(ident.name).type, ValCat::LVALUE);
+      g_anl.sym_table.try_emplace(ident.id, m_scope_arena[m_scope_stack[i]]->m_sym_table.at(ident.name));
+      return ExprInfo(m_scope_arena[m_scope_stack[i]]->m_sym_table.at(ident.name).type, ValCat::LVALUE);
     }
 
   Utils::panic("Identifier '" + ident.name + "' does not exist");
@@ -261,7 +341,9 @@ Sema::ExprInfo Sema::analyze_lit(const std::shared_ptr<Node::Lit>& lit)
     return analyze_string(*string);
   if (auto c = std::dynamic_pointer_cast<Node::Char>(lit))
     return analyze_char(*c);
-  else if (auto ident = std::dynamic_pointer_cast<Node::Ident>(lit))
+  if (auto path = std::dynamic_pointer_cast<Node::Path>(lit))
+    return analyze_path(*path);
+  if (auto ident = std::dynamic_pointer_cast<Node::Ident>(lit))
     return analyze_ident(*ident);
   Utils::panic("Unexpected analyze literal");
 }
@@ -276,6 +358,9 @@ void Sema::analyze_decl(const std::shared_ptr<Node::Decl>& decl)
 
   else if (auto func = std::dynamic_pointer_cast<Node::Func>(decl))
     analyze_func(*func);
+
+  else if (auto ns = std::dynamic_pointer_cast<Node::Namespace>(decl))
+    analyze_namespace(*ns);
 }
 
 void Sema::analyze_asgn(const Node::Asgn& asgn)
@@ -328,8 +413,29 @@ void Sema::analyze_asgn(const Node::Asgn& asgn)
   */
   // else
   {
-    m_scope_stack.back()->m_sym_table.emplace(asgn.id.name, Sema::Symbol(t, Sema::Symbol::VarExt(get_curr_scope()->prev == nullptr)));
-    g_anl.sym_table.try_emplace(asgn.id.id, m_scope_stack.back()->m_sym_table.at(asgn.id.name));
+    std::string name;
+    if (get_curr_scope()->prev == nullptr && m_mang_pref.empty())
+      name = asgn.id.name;
+    else
+    {
+      std::string mname = "_ZN";
+      for (auto& str : m_mang_pref)
+        mname += std::to_string(str.size()) + str;
+      mname += std::to_string(asgn.id.name.size()) + asgn.id.name;
+      name = mname;
+    }
+
+    Sema::Symbol::VarExt sym(name, get_curr_scope()->prev == nullptr);
+    m_scope_arena[m_scope_stack.back()]->m_sym_table.emplace(
+      asgn.id.name, Sema::Symbol(t, sym)
+    );
+    g_anl.sym_table.try_emplace(asgn.id.id, m_scope_arena[m_scope_stack.back()]->m_sym_table.at(asgn.id.name));
+    /*
+    m_scope_arena[m_scope_stack.back()]->m_sym_table.emplace(
+      asgn.id.name, Sema::Symbol(t, Sema::Symbol::VarExt(get_curr_scope()->prev == nullptr))
+    );
+    g_anl.sym_table.try_emplace(asgn.id.id, m_scope_arena[m_scope_stack.back()]->m_sym_table.at(asgn.id.name));
+    */
   }
 
   if (asgn.val)
@@ -347,9 +453,11 @@ void Sema::analyze_if(const Node::If& if_)
 {
   analyze_expr(if_.cond);
 
-  auto sc = std::make_unique<Scope>();
-  sc->prev = m_scope_stack.back().get();
-  m_scope_stack.push_back(std::move(sc));
+  m_scope_arena.push_back(std::make_unique<Scope>());
+  auto& sc = m_scope_arena.back();
+  sc->prev = m_scope_arena[m_scope_stack.back()].get();
+  m_scope_stack.push_back(m_scope_arena.size() - 1);
+
   analyze_scope(*if_.scope);
   pop_scope();
 
@@ -358,9 +466,10 @@ void Sema::analyze_if(const Node::If& if_)
 
 void Sema::analyze_for(const Node::For& for_)
 {
-  auto sc = std::make_unique<Scope>();
-  sc->prev = m_scope_stack.back().get();
-  m_scope_stack.push_back(std::move(sc));
+  m_scope_arena.push_back(std::make_unique<Scope>());
+  auto& sc = m_scope_arena.back();
+  sc->prev = m_scope_arena[m_scope_stack.back()].get();
+  m_scope_stack.push_back(m_scope_arena.size() - 1);
 
   if (for_.init) analyze_asgn(**for_.init);
   if (for_.cond) analyze_expr(*for_.cond);
@@ -382,19 +491,83 @@ Sema::ExprInfo Sema::analyze_expr_stmt(const Node::ExprStmt& expr_stmt)
 
 void Sema::analyze_type_def(const Node::TypeDef& def)
 {
+
+  auto analyze_type = [&](const std::variant<Node::TypeDef, Node::TypeRef>& var)
+  {
+    return std::visit(
+      Utils::overloaded
+      {
+        [&](const Node::TypeDef& def) { analyze_type_def(def); },
+        [&](const Node::TypeRef& ref) { analyze_type_ref(ref); }
+      }, var
+    );
+  };
+
   std::visit(
     Utils::overloaded
     {
-      [&](const std::shared_ptr<Node::Struct>& stc) { analyze_struct(*stc); },
-      [&](const std::shared_ptr<Node::Union>& un) { analyze_union(*un); },
-      [&](const std::shared_ptr<Node::Enum>& en) { analyze_enum(*en); }
-    }
-    ,def.type
+      [&](const std::shared_ptr<Node::Struct>& stc)
+      {
+        auto stc_res_t = std::get_if<Type::Struct>(&def.res_t->type);
+        assert(stc_res_t);
+        for (auto& [type, member] : stc->members)
+        {
+          auto tp = Node::get_res_t(type);
+          analyze_type(type);
+          assert(tp->is_complete());
+          stc_res_t->insert_mem(tp, member.name);
+        }
+        stc_res_t->finish();
+        
+        auto strct_ext = Sema::Symbol::StcExt();
+        get_curr_scope()->m_sym_table.try_emplace(stc->id.name, Sema::Symbol(Type(*stc_res_t), strct_ext));
+        g_anl.sym_table.try_emplace(stc->id.id, get_curr_scope()->m_sym_table.at(stc->id.name));
+        get_curr_scope()->m_types_table.insert(stc->id.name);
+      },
+      [&](const std::shared_ptr<Node::Union>& un)
+      {
+        auto un_res_t = std::get_if<Type::Union>(&def.res_t->type);
+        assert(un_res_t);
+        for (auto& [type, member] : un->members)
+        {
+          auto tp = Node::get_res_t(type);
+          analyze_type(type);
+          assert(tp->is_complete());
+          un_res_t->insert_mem(tp, member.name);
+        }
+        un_res_t->finish();
+
+        auto uni_ext = Sema::Symbol::UniExt();
+        get_curr_scope()->m_sym_table.try_emplace(un->id.name, Sema::Symbol(Type(*un_res_t), uni_ext));
+        g_anl.sym_table.try_emplace(un->id.id, get_curr_scope()->m_sym_table.at(un->id.name));
+        get_curr_scope()->m_types_table.insert(un->id.name);
+      },
+      [&](const std::shared_ptr<Node::Enum>& en)
+      {
+        auto en_res_t = std::get_if<Type::Enum>(&def.res_t->type);
+        assert(en_res_t);
+        for (auto& asgn : en->enums)
+        {
+          assert(asgn.val.has_value() && std::holds_alternative<std::shared_ptr<Node::Expr>>(asgn.val.value()));
+          auto v = std::get<std::shared_ptr<Node::Expr>>(asgn.val.value());
+          en_res_t->enums.try_emplace(asgn.id.name, std::move(v));
+          analyze_asgn(asgn);
+        }
+        en_res_t->state = Type::TypeState::RESOLVED;
+
+        auto enu_ext = Sema::Symbol::EnuExt();
+        get_curr_scope()->m_sym_table.try_emplace(en->id.name, Sema::Symbol(Type(*en_res_t), enu_ext));
+        g_anl.sym_table.try_emplace(en->id.id, get_curr_scope()->m_sym_table.at(en->id.name));
+        get_curr_scope()->m_types_table.insert(en->id.name);
+      }
+    }, def.type
   );
 }
 
 void Sema::analyze_type_ref(const Node::TypeRef& ref)
 {
+  assert(ref.res_t->is_complete() && "Type reference not resolved");
+  /*
   auto analyze_type = [&](auto&& self, std::shared_ptr<Type>& type) -> void
   {
     std::visit(
@@ -441,11 +614,17 @@ void Sema::analyze_type_ref(const Node::TypeRef& ref)
           auto sym = cur->m_sym_table.at(e.name);
           assert(sym.type.is_enum_t());
           e = std::get<Type::Enum>(sym.type.type);
+        },
+        [&](Type::Func& f) -> void
+        {
+          for (auto& p : f.params) self(self, p);
+          self(self, f.ret);
         }
       }, type->type);
     };
 
   analyze_type(analyze_type, ref.res_t);
+  */
   /*
   std::visit(
     Utils::overloaded
@@ -512,8 +691,28 @@ void Sema::analyze_func(const Node::Func& func)
   )
     Utils::panic("Function '" + func.id.name + "' already exist");
 
-  auto fn_ext = Sema::Symbol::FnExt(func.id.name, func.params);
-  get_curr_scope()->m_sym_table.try_emplace(func.id.name, Sema::Symbol(*func.ret_type.res_t, fn_ext));
+  std::string name;
+  if (get_curr_scope()->prev == nullptr)
+    name = func.id.name;
+  else
+  {
+    std::string mname = "_ZN";
+    for (auto& str : m_mang_pref)
+      mname += std::to_string(str.size()) + str;
+    mname += std::to_string(func.id.name.size()) + func.id.name;
+    name = mname;
+  }
+  auto fn_ext = Sema::Symbol::FnExt(name, func.params);
+  std::vector<std::shared_ptr<Type>> param_types;
+  for (auto& p : func.params)
+    if (!p.type.res_t->is_complete()) assert(false);
+  for (auto& p : func.params) param_types.push_back(p.type.res_t);
+  assert(
+    func.ret_type.res_t->is_complete() ||
+    (func.ret_type.res_t->is_base_t() && std::get<Type::Base>(func.ret_type.res_t->type) == Type::Base::VOID)
+  );
+  auto tp = Type(Type::Func(param_types, func.ret_type.res_t));
+  get_curr_scope()->m_sym_table.try_emplace(func.id.name, Sema::Symbol(tp, fn_ext));
   g_anl.sym_table.try_emplace(func.id.id, get_curr_scope()->m_sym_table.at(func.id.name));
 
   /*
@@ -527,9 +726,10 @@ void Sema::analyze_func(const Node::Func& func)
   // Func is now nested twice as a workaround for not having potential redifinition errors
   if (func.scope.has_value())
   {
-    auto sc = std::make_unique<Scope>();
-    sc->prev = m_scope_stack.back().get();
-    m_scope_stack.push_back(std::move(sc));
+    m_scope_arena.push_back(std::make_unique<Scope>());
+    auto& sc = m_scope_arena.back();
+    sc->prev = m_scope_arena[m_scope_stack.back()].get();
+    m_scope_stack.push_back(m_scope_arena.size() - 1);
 
     for (auto& param : func.params)
     {
@@ -537,9 +737,11 @@ void Sema::analyze_func(const Node::Func& func)
       g_anl.sym_table.try_emplace(param.id, get_curr_scope()->m_sym_table.at(param.name));
     }
 
-    auto sc2 = std::make_unique<Scope>();
-    sc2->prev = m_scope_stack.back().get();
-    m_scope_stack.push_back(std::move(sc2));
+    m_scope_arena.push_back(std::make_unique<Scope>());
+    auto& sc2 = m_scope_arena.back();
+    sc2->prev = m_scope_arena[m_scope_stack.back()].get();
+    m_scope_stack.push_back(m_scope_arena.size() - 1);
+
     analyze_scope(func.scope.value());
     pop_scope();
     pop_scope();
@@ -561,6 +763,8 @@ void Sema::analyze_scope(const Node::Scope& scope)
 
 void Sema::analyze_struct(const Node::Struct& strct)
 {
+  assert(false);
+  /*
   if (
     get_curr_scope()->m_sym_table.find(strct.id.name) != get_curr_scope()->m_sym_table.end() &&
     get_curr_scope()->m_sym_table.at(strct.id.name).is_st()
@@ -673,6 +877,7 @@ void Sema::analyze_struct(const Node::Struct& strct)
     if (!is_valid_type(*t))
       Utils::panic("Unknown type '" + Type::to_string(*t) + "' in struct definition");
   }
+  */
 }
 
 void Sema::analyze_union(const Node::Union& un)
@@ -795,15 +1000,47 @@ void Sema::analyze_enum(const Node::Enum& enm)
   get_curr_scope()->m_types_table.insert(enmt.name);
 }
 
+void Sema::analyze_namespace(const Node::Namespace& ns)
+{
+  if (
+    get_curr_scope()->m_sym_table.find(ns.id.name) != get_curr_scope()->m_sym_table.end() &&
+    get_curr_scope()->m_sym_table.at(ns.id.name).is_ns()
+  )
+  {
+    auto& v = get_curr_scope()->m_sym_table.at(ns.id.name);
+    assert(v.is_ns());
+    auto scpid = std::get<Sema::Symbol::NsExt>(v.ext).scp_id;
+
+    m_scope_stack.push_back(scpid);
+    m_mang_pref.push_back(std::to_string(ns.id.name.size()) + ns.id.name);
+    analyze_scope(ns.scp);
+    m_mang_pref.pop_back();
+    m_scope_stack.pop_back();
+  }
+  else
+  {
+    uint32_t i = m_scope_arena.size();
+    m_scope_arena.push_back(std::make_unique<Scope>());
+    m_scope_stack.push_back(i);
+    m_mang_pref.push_back(std::to_string(ns.id.name.size()) + ns.id.name);
+    analyze_scope(ns.scp);
+    m_mang_pref.pop_back();
+    m_scope_stack.pop_back();
+
+    get_curr_scope()->m_sym_table.try_emplace(ns.id.name, Sema::Symbol(Type(Type::Base::VOID), Sema::Symbol::NsExt(i)));
+    g_anl.sym_table.try_emplace(ns.id.id, get_curr_scope()->m_sym_table.at(ns.id.name));
+  }
+}
+
 Sema::Scope* Sema::get_curr_scope()
 {
-  return m_scope_stack.back().get();
+  return m_scope_arena[m_scope_stack.back()].get();
 }
 
 void Sema::push_scope()
 {
-  auto scp = std::make_unique<Scope>();
-  m_scope_stack.push_back(std::move(scp));
+  m_scope_stack.push_back(m_scope_arena.size());
+  m_scope_arena.push_back(std::make_unique<Scope>());
 }
 
 void Sema::pop_scope()
@@ -813,6 +1050,7 @@ void Sema::pop_scope()
   m_scope_stack.pop_back();
 }
 
+/*
 void Sema::register_struct_t(const Node::Struct& strct)
 {
   auto st = Type::Struct(strct.id.name);
@@ -858,6 +1096,7 @@ Type Sema::get_type(const std::string& name)
   for (; scp && !scp->m_sym_table.count(name); scp = scp->prev);
   return scp->m_sym_table.at(name).type;
 }
+*/
 
 Sema::Module* Sema::load_module()
 {
@@ -902,11 +1141,19 @@ bool Sema::is_valid_type(const Type& type)
         );
         return cur != nullptr;
       },
+      [&](const Type::Func& f)
+      {
+        bool ok = true;
+        for (auto& p : f.params) ok &= is_valid_type(*p);
+        ok &= is_valid_type(*f.ret);
+        return ok;
+      }
     }, type.type
   );
   return true;
 }
 
+/*
 void Sema::populate_stc_t(Type::Struct& stc_t)
 {
   auto cur = get_curr_scope();
@@ -920,10 +1167,11 @@ void Sema::populate_stc_t(Type::Struct& stc_t)
   assert(sym.type.is_struct_t());
   stc_t = std::get<Type::Struct>(sym.type.type);
 }
+*/
 
+/*
 void Sema::populate_stc(const Node::Ident& base, const Type::Struct& stc_t)
 {
-  /*
   bool ok = false;
   for (int i = (int)m_scope_stack.size() - 1; i >= 0; i--)
   {
@@ -944,5 +1192,5 @@ void Sema::populate_stc(const Node::Ident& base, const Type::Struct& stc_t)
     if (!type.is_struct_t()) {}
     else populate_stc(member);
   }
-  */
 }
+*/
