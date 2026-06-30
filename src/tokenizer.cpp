@@ -239,7 +239,12 @@ std::vector<Token> Tokenizer::tokenize()
     else if (peek().value() == ':')
     {
       consume();
-      tokens.emplace_back(TokenTypes::Symbol::COL);
+      if (peek() && peek() == ':')
+      {
+        consume();
+        tokens.emplace_back(TokenTypes::Symbol::NSR);
+      }
+      else tokens.emplace_back(TokenTypes::Symbol::COL);
     }
     else if (peek().value() == '}')
     {

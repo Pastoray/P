@@ -35,6 +35,7 @@
   OP(NOT, "!") \
   OP(DOT, ".") \
   OP(COL, ":") \
+  OP(NSR, "::") \
   OP(QM, "\"") \
   OP(SEMICOL, ";")
 
@@ -57,7 +58,8 @@
   OP(STRUCT, "struct") \
   OP(UNION, "union") \
   OP(ENUM, "enum") \
-  OP(IMPORT, "import")
+  OP(IMPORT, "import") \
+  OP(NAMEPSACE, "namespace")
 
 namespace TokenTypes
 {
@@ -86,8 +88,7 @@ namespace TokenTypes
   };
 }
 
-using TokenType =
-    std::variant<TokenTypes::Symbol, TokenTypes::Keyword, TokenTypes::Literal>;
+using TokenType = std::variant<TokenTypes::Symbol, TokenTypes::Keyword, TokenTypes::Literal>;
 
 struct Token
 {

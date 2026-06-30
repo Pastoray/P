@@ -74,10 +74,11 @@ namespace IR
     explicit Label(std::string name, Kind k, Type tp) : type(std::move(tp)), id(nid++), name(std::move(name)), kind(k) {}
 
   public:
-    static Label create_code(const std::optional<std::string>& str = {})
+    static Label create_code(const std::optional<std::string>& str = {}, const std::optional<Type>& tp = {})
     {
-      if (str) return Label(*str, CODE, Type(Type::Base::VOID));
-      return Label("label_" + std::to_string(nid), CODE, Type(Type::Base::VOID));
+      Type type = tp ? tp.value() : Type(Type::Base::VOID);
+      if (str) return Label(*str, CODE, type);
+      return Label("label_" + std::to_string(nid), CODE, type);
     }
 
     static Label create_bss(std::string name, Type tp)
@@ -304,10 +305,11 @@ namespace IR
 
   struct Call
   {
-    std::string callable;
+    // std::string callable;
+    Operand callable;
     std::vector<Operand> args;
     Operand dest;
-    explicit Call(Operand dest) : dest(std::move(dest)) {}
+    explicit Call(Operand callable, Operand dest) : callable(std::move(callable)), dest(std::move(dest)) {}
   };
 
   inline std::ostream& operator<<(std::ostream& os, const Call& call)
@@ -524,11 +526,13 @@ class IRGen
     void visit(const Node::Struct&) override;
     void visit(const Node::Union&) override;
     void visit(const Node::Enum&) override;
+    void visit(const Node::Namespace&) override;
 
     void visit(const Node::UnExpr&) override;
     void visit(const Node::BinExpr&) override;
     // void visit(const Node::MemberExpr&) override;
     void visit(const Node::Ident&) override;
+    void visit(const Node::Path&) override;
     void visit(const Node::Int&) override;
     void visit(const Node::Float&) override;
     void visit(const Node::String&) override;
@@ -555,10 +559,12 @@ private:
   void gen_struct(const Node::Struct&);
   void gen_union(const Node::Union&);
   void gen_enum(const Node::Enum&);
+  void gen_namespace(const Node::Namespace&);
   void gen_un_expr(const Node::UnExpr&);
   void gen_bin_expr(const Node::BinExpr&);
   // void gen_mem_expr(const Node::MemberExpr&);
   void gen_ident(const Node::Ident&);
+  void gen_path(const Node::Path&);
   void gen_int(const Node::Int&);
   void gen_float(const Node::Float&);
   void gen_string(const Node::String&);

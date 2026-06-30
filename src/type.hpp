@@ -7,6 +7,7 @@
 #include <cassert>
 #include <cstdint>
 #include <numeric>
+#include <sstream>
 #include <string>
 #include <memory>
 #include <variant>
@@ -31,9 +32,18 @@ struct Type
     CHAR,
     VOID,
   };
+
+  enum class TypeState
+  {
+    UNRESOLVED,
+    RESOLVING,
+    RESOLVED,
+  };
+
   struct Struct
   {
-    explicit Struct(std::string name) : name(std::move(name)), body(std::make_shared<Body>()), size(0) {}
+    explicit Struct(std::string name)
+      : name(std::move(name)), body(std::make_shared<Body>()), size(0), state(TypeState::UNRESOLVED) {}
     std::string name;
     struct Body
     {
@@ -42,6 +52,7 @@ struct Type
     };
 
     std::shared_ptr<Body> body;
+    TypeState state;
     size_t size;
 
     bool operator==(const Struct& other) const { return name == other.name; };
@@ -75,12 +86,15 @@ struct Type
       size_t align = size % max_mem->second->alignment();
       if (align != 0)
         size += max_mem->second->alignment() - align;
+      state = TypeState::RESOLVED;
     }
   };
 
   struct Union
   {
-    explicit Union(std::string name) : name(std::move(name)), body(std::make_shared<Body>()), size(0) {}
+    explicit Union(std::string name)
+      : name(std::move(name)), body(std::make_shared<Body>()), size(0), state(TypeState::UNRESOLVED) {}
+
     std::string name;
     struct Body
     {
@@ -89,6 +103,7 @@ struct Type
     };
 
     std::shared_ptr<Body> body;
+    TypeState state;
     size_t size;
 
     bool operator==(const Union& other) const { return name == other.name; };
@@ -111,15 +126,34 @@ struct Type
       size_t align = size % max_mem->second->alignment();
       if (align != 0)
         size += max_mem->second->alignment() - align;
+      state = TypeState::RESOLVED;
+    }
+  };
+
+  struct Func
+  {
+    std::vector<std::shared_ptr<Type>> params;
+    std::shared_ptr<Type> ret;
+
+    Func(std::vector<std::shared_ptr<Type>> params, std::shared_ptr<Type> ret)
+      : params(std::move(params)), ret(std::move(ret)) {}
+    bool operator==(const Func& other) const
+    {
+      if (params.size() != other.params.size() || *ret != *other.ret) return false;
+
+      bool eq = true;
+      for (size_t i = 0; i < params.size(); i++) eq &= *params[i] == *other.params[i];
+      return eq;
     }
   };
 
   struct Enum
   {
-    explicit Enum(std::string name) : name(std::move(name)) {}
+    explicit Enum(std::string name) : name(std::move(name)), state(TypeState::UNRESOLVED) {}
     std::string name;
     // std::shared_ptr<Type> tag;
     std::unordered_map<std::string, std::shared_ptr<void>> enums;
+    TypeState state;
     bool operator==(const Enum& other) const { return name == other.name; };
   };
 
@@ -138,8 +172,10 @@ struct Type
     bool operator==(const Arr& other) const { return *of == *other.of && size == other.size; }
   };
 
-  using TypeVar = std::variant<Base, Ptr, Arr, Struct, Union, Enum>;
+  using TypeVar = std::variant<Base, Ptr, Arr, Struct, Union, Enum, Func>;
+
   TypeVar type;
+  /*
   explicit Type(std::string id)
   {
     if (auto base_t = string_to_base_t(id))
@@ -149,6 +185,7 @@ struct Type
     }
     type = Struct{ std::move(id) };
   }
+  */
 
   explicit Type (TypeVar tp)
   { type = std::move(tp); }
@@ -181,6 +218,11 @@ struct Type
   [[nodiscard]] bool is_enum_t() const
   {
     return std::holds_alternative<Enum>(type);
+  }
+
+  [[nodiscard]] bool is_func_t() const
+  {
+    return std::holds_alternative<Func>(type);
   }
 
   [[nodiscard]] bool is_int() const
@@ -278,6 +320,10 @@ struct Type
         {
           return 4;
         },
+        [](const Func& fn) -> size_t
+        {
+          return 8;
+        }
       }, type
     );
   }
@@ -321,6 +367,10 @@ struct Type
         {
           return size();
         },
+        [this](const Func& fn) -> size_t
+        {
+          return size();
+        },
       }, type
     );
   }
@@ -352,6 +402,11 @@ struct Type
         [](const Enum& en) -> std::shared_ptr<Type>
         {
           assert(false && "type.inner() on enum is ambiguous");
+          return nullptr;
+        },
+        [](const Func& fn) -> std::shared_ptr<Type>
+        {
+          assert(false && "type.inner() on function is ambiguous");
           return nullptr;
         },
       }, type
@@ -426,6 +481,21 @@ struct Type
   {
     return type.name;
   }
+  
+  static std::string to_string(const Type::Func& type)
+  {
+    std::stringstream res;
+    res << to_string(*type.ret);
+    res << "(";
+    
+    for (auto& p : type.params)
+      res << *p << ", ";
+
+    std::string res_str = res.str();
+    if (!type.params.empty()) { res_str.pop_back(); res_str.pop_back(); }
+    res_str += std::string(")");
+    return res_str;
+  }
 
   static std::string to_string(const Type::Arr& type)
   {
@@ -466,67 +536,84 @@ struct Type
         [](const Union& un) -> int
         { return 999; },
         [](const Enum& en) -> int
-        { return 100 + 4; }
+        { return 100 + 4; },
+        [](const Func& fn) -> int
+        { assert(false && "Function type cannot be used in expressions"); }
+      }, type
+    );
+  }
+
+  [[nodiscard]] bool is_complete() const
+  {
+    return std::visit(
+      Utils::overloaded
+      {
+        [](const Type::Base& b) { return b != Type::Base::VOID; },
+        [](const Type::Ptr& p) { return true; },
+        [](const Type::Arr& a) { return true; },
+        [](const Type::Struct& s) { return s.state == TypeState::RESOLVED; },
+        [](const Type::Union& u) { return u.state == TypeState::RESOLVED; },
+        [](const Type::Enum& e) { return e.state == TypeState::RESOLVED; },
+        [](const Type::Func& f)
+        {
+          return (
+            f.ret->is_complete() &&
+            std::all_of(f.params.begin(), f.params.end(), [&](auto&& param) { return param->is_complete(); })
+          );
+        }
       }, type
     );
   }
 };
 
-template <>
-struct std::hash<Type::Struct>
-{
-  size_t operator()(const Type::Struct& t) const noexcept
-  {
-    return std::hash<std::string>{}(t.name);
-  }
-};
+template <> struct std::hash<Type::Struct> { size_t operator()(const Type::Struct& t) const noexcept; };
+template <> struct std::hash<Type::Union> { size_t operator()(const Type::Union& t) const noexcept; };
+template <> struct std::hash<Type::Enum> { size_t operator()(const Type::Enum& t) const noexcept; };
+template <> struct std::hash<Type::Func> { size_t operator()(const Type::Func& t) const noexcept; };
+template <> struct std::hash<Type::Ptr> { size_t operator()(const Type::Ptr& t) const noexcept; };
+template <> struct std::hash<Type::Arr> { size_t operator()(const Type::Arr& t) const noexcept; };
+template <> struct std::hash<Type> { size_t operator()(const Type& t) const noexcept; };
 
-template <>
-struct std::hash<Type::Union>
+inline size_t std::hash<Type>::operator()(const Type& t) const noexcept
 {
-  size_t operator()(const Type::Union& t) const noexcept
-  {
-    return std::hash<std::string>{}(t.name);
-  }
-};
+  size_t h = std::visit([](auto&& arg) { return std::hash<std::decay_t<decltype(arg)>>{}(arg); }, t.type);
+  return h ^ (std::hash<size_t>{}(t.type.index()) << 1);
+}
 
-template <>
-struct std::hash<Type::Enum>
+inline size_t std::hash<Type::Struct>::operator()(const Type::Struct& t) const noexcept
 {
-  size_t operator()(const Type::Enum& t) const noexcept
-  {
-    return std::hash<std::string>{}(t.name);
-  }
-};
+  return std::hash<std::string>{}(t.name);
+}
 
-template <>
-struct std::hash<Type::Ptr>
+inline size_t std::hash<Type::Union>::operator()(const Type::Union& t) const noexcept
 {
-  size_t operator()(const Type::Ptr& t) const noexcept
-  {
-    return std::hash<Type*>{}(t.to.get());
-  }
-};
+  return std::hash<std::string>{}(t.name);
+}
 
-template <>
-struct std::hash<Type::Arr>
+inline size_t std::hash<Type::Enum>::operator()(const Type::Enum& t) const noexcept
 {
-  size_t operator()(const Type::Arr& t) const noexcept
-  {
-    auto h1 = std::hash<Type*>{}(t.of.get());
-    // auto h2 = std::hash<size_t>{}(t.size);
-    return h1; // ^ (h2 << 1);
-  }
-};
+  return std::hash<std::string>{}(t.name);
+}
 
-template <>
-struct std::hash<Type>
+inline size_t std::hash<Type::Func>::operator()(const Type::Func& t) const noexcept
 {
-  size_t operator()(const Type& t) const noexcept
-  {
-    size_t h = std::visit([](auto&& arg) { return std::hash<std::decay_t<decltype(arg)>>{}(arg); }, t.type);
-    return h ^ (std::hash<size_t>{}(t.type.index()) << 1);
-  }
-};
+  auto combine = [&](std::size_t& seed, std::size_t value) noexcept
+  { seed ^= value + 0x9e3779b9 + (seed << 6) + (seed >> 2); };
+
+  size_t seed = 0;
+  if (t.ret) combine(seed, std::hash<Type>{}(*t.ret));
+  for (auto& p : t.params) combine(seed, std::hash<Type>{}(*p));
+  return seed;
+}
+
+inline size_t std::hash<Type::Ptr>::operator()(const Type::Ptr& t) const noexcept
+{
+  return std::hash<Type>{}(*t.to);
+}
+
+inline size_t std::hash<Type::Arr>::operator()(const Type::Arr& t) const noexcept
+{
+  return std::hash<Type*>{}(t.of.get());
+}
 
 #endif // TYPE_H

@@ -57,4 +57,5 @@ add_e2e_test(structfp "structfp.p" "6.900000\n121202.674099")
 add_e2e_test(string "string.p" "Hello, World! ✨\nHolloWs\n")
 add_e2e_test(signal "signal.p" "\n[SIGNAL INTERCEPTED] SIGSEGV Detect, Shutting down..\n")
 add_e2e_test(io "io.p" "Hello from the Disk! 💾")
+add_e2e_test(namespace "namespace.p" "25\n2\n162\n15\n456\n124\n540\n582\nDone..\n100")
 
