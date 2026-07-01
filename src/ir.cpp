@@ -29,8 +29,6 @@ void IRGen::Visitor::visit(const Node::BinExpr& bin_expr) { m_gen.gen_bin_expr(b
 
 void IRGen::Visitor::visit(const Node::UnExpr& un_expr) { m_gen.gen_un_expr(un_expr); }
 
-// void IRGen::Visitor::visit(const Node::MemberExpr& mem_expr) { m_gen.gen_mem_expr(mem_expr); };
-
 void IRGen::Visitor::visit(const Node::Ident& ident) { m_gen.gen_ident(ident); }
 
 void IRGen::Visitor::visit(const Node::Path& path) { m_gen.gen_path(path); }
@@ -117,46 +115,25 @@ void IRGen::gen_fn(const Node::Func& func)
     aid_to_l.try_emplace(sym.id, fn_lab);
     return;
   }
-  
-  /* instead of flattening the function we keep it packed */
-  // auto old_sym_table = sym_table;
-  // auto old_reg_id = m_reg_id;
-
-  // sym_table.clear();
-  // m_reg_id = 1;
-
-  /*
-  IR::Label fn_lab(func.id.name, 0);
-  IR::Label end_lab = new_label(0);
-  */
 
   auto sym = m_anl.sym_table.at(func.id.id);
   auto* ext = std::get_if<Sema::Symbol::FnExt>(&sym.ext);
   IR::Label fn_lab = IR::Label::create_code(ext->mang_name, sym.type);
   aid_to_l.try_emplace(sym.id, fn_lab);
-  // IR::Label end_lab = IR::Label::create_code(func.id.name + "_end");
   IR::Label end_lab = IR::Label::create_code();
   m_instructs->emplace_back(IR::Jmp(end_lab));
 
-  // IR::Func fn(fn_lab);
   auto fn = std::make_shared<IR::Func>(fn_lab);
-  // sym_table.emplace_back(); // function scope
   for (const Node::Param& prm : func.params)
   {
-    // const IR::Reg r = new_reg(4);
     IR::Reg r(m_anl.sym_table.at(prm.id).type);
     {
       auto key = m_anl.sym_table.at(prm.id).id;
       aid_to_r.try_emplace(key, r);
-      // m_instructs->emplace_back(IR::Store(aid_to_r.at(key), top));
     }
 
     const IR::Param param(r);
     fn->params.emplace_back(param);
-    // sym_table.back().try_emplace(member.id, r);
-    /*
-    m_instructs->emplace_back(IR::Param{ r });
-    */
   }
 
   m_instructs->emplace_back(fn);
@@ -168,34 +145,16 @@ void IRGen::gen_fn(const Node::Func& func)
   m_ctx_stack.pop_back();
 
   m_instructs = prev_instructs;
-  // sym_table = old_sym_table;
-  // m_reg_id = old_reg_id;
 
   m_instructs->emplace_back(end_lab);
 
 }
 
-void IRGen::gen_struct(const Node::Struct& strct)
-{
-  // noop
+void IRGen::gen_struct(const Node::Struct&) {}
 
-  /// ???
-  /// for (auto member : strct.members)
-  /// {
-  ///   m_instructs->emplace_back(IR::Load{new_reg(), sym_table[member.id]});
-  /// }
-  /// strct.scope->accept(*this);
-}
+void IRGen::gen_union(const Node::Union&) {}
 
-void IRGen::gen_union(const Node::Union&)
-{
-  // Noop
-}
-
-void IRGen::gen_enum(const Node::Enum&)
-{
-  // Noop
-}
+void IRGen::gen_enum(const Node::Enum&) {}
 
 void IRGen::gen_namespace(const Node::Namespace& ns)
 {
@@ -242,7 +201,6 @@ void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
       if (IR::get_type(lhs_oper).is_arr_t()) for (; t.is_arr_t(); t = *t.inner());
       else t = *t.inner();
       int stride = t.size();
-      // m_instructs->emplace_back(IR::Store(scl, rhs_oper));
       coerce(rhs_oper, Type(Type::Base::I64));
       rhs_oper = m_stack.top();
       m_stack.pop();
@@ -267,7 +225,6 @@ void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
       if (IR::get_type(rhs_oper).is_arr_t()) for (; t.is_arr_t(); t = *t.inner());
       else t = *t.inner();
       int stride = t.size();
-      // m_instructs->emplace_back(IR::Store(scl, lhs_oper));
       coerce(lhs_oper, Type(Type::Base::I64));
       lhs_oper = m_stack.top();
       m_stack.pop();
@@ -436,7 +393,6 @@ void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
 
           int d2 = 0;
           for (auto t = new_t; t.is_arr_t(); t = *t.inner()) d2++;
-          std::cout << "DIMEN DIFF = " << d1 << " - " << d2 << std::endl;
 
           IR::Reg stride(Type{ Type::Base::I64 });
           m_instructs->emplace_back(IR::Store(stride, IR::Lit(1, Type(Type::Base::I64))));
@@ -452,7 +408,6 @@ void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
           m_instructs->emplace_back(IR::Binop(new_r, new_r, BinOp::MUL, stride));
           m_instructs->emplace_back(IR::Binop(idx, idx, BinOp::ADD, new_r));
           new_t = *new_t.inner();
-          // scale = IR::Lit(new_t.size(), Type(Type::Base::I32));
           scale = IR::Lit(1, Type(Type::Base::I32));
         }
 
@@ -462,23 +417,6 @@ void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
       break;
     case BinOp::DOT:
       {
-        /*
-        IR::Reg reg(IR::get_type(lhs_oper));
-        IR::Reg idx(Type{ Type::Base::I64 });
-        m_instructs->emplace_back(IR::Store(reg, lhs_oper));
-        m_instructs->emplace_back(IR::Store(idx, rhs_oper));
-  
-        m_stack.emplace(
-          IR::Mem(
-            IR::get_type(rhs_oper),
-            {},
-            reg,
-            idx,
-            IR::Lit(1, Type(Type::Base::I32))
-          )
-        );
-        */
-
         new_r.type = Type(Type::Ptr(std::make_shared<Type>(new_r.type)));
 
         IR::Reg idx(Type{ Type::Base::I64 });
@@ -496,7 +434,6 @@ void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
         auto off = std::get<IR::Lit>(rhs_oper);
         assert(off.is_int());
 
-        // assert(new_r.type.inner()->is_struct_t());
         if (auto* stc = std::get_if<Type::Struct>(&new_r.type.inner()->type))
         {
           std::string tmem;
@@ -544,19 +481,11 @@ void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
           );
         }
         else assert(false);
-        /*
-        IR::Reg new_r2(IR::get_type(rhs_oper));
-        m_instructs->emplace_back(
-            IR::Unop{ new_r2, new_r, UnOp::DEREF });
-        m_stack.emplace(new_r2);
-        */
         break;
       }
       break;
     case BinOp::ARROW:
       {
-        // new_r.type = Type(Type::Ptr(std::make_shared<Type>(new_r.type)));
-
         IR::Reg idx(Type{ Type::Base::I64 });
         coerce(rhs_oper, Type(Type::Base::I64));
         auto new_rhs = m_stack.top();
@@ -571,7 +500,6 @@ void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
         assert(std::holds_alternative<IR::Lit>(rhs_oper));
         auto off = std::get<IR::Lit>(rhs_oper);
 
-        // assert(new_r.type.inner()->is_struct_t());
         if (auto* stc = std::get_if<Type::Struct>(&new_r.type.inner()->type))
         {
           std::string tmem;
@@ -619,12 +547,6 @@ void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
           );
         }
         else assert(false);
-        /*
-        IR::Reg new_r2(IR::get_type(rhs_oper));
-        m_instructs->emplace_back(
-            IR::Unop{ new_r2, new_r, UnOp::DEREF });
-        m_stack.emplace(new_r2);
-        */
         break;
       }
     default:
@@ -632,25 +554,6 @@ void IRGen::gen_bin_expr(const Node::BinExpr& bin_expr)
       break;
   }
 }
-
-/*
-void IRGen::gen_mem_expr(const Node::MemberExpr& mem_expr)
-{
-  mem_expr.expr->accept(m_visitor);
-  IR::Operand lhs_oper = m_stack.top();
-  m_stack.pop();
-
-  auto* reg = std::get_if<IR::Reg>(&lhs_oper);
-  assert(reg != nullptr);
-
-  auto* strct_tp = std::get_if<Type::Struct>(&reg->type.type);
-  assert(strct_tp != nullptr);
-
-  size_t off = strct_tp->body->offsets.at(mem_expr.member);
-  Type tp = *strct_tp->body->types.at(mem_expr.member);
-  m_stack.emplace(IR::Mem(tp, IR::Lit(off, Type(Type::Base::I64)), *reg, {}, {}));
-}
-*/
 
 void IRGen::gen_un_expr(const Node::UnExpr& un_expr)
 {
@@ -733,29 +636,12 @@ void IRGen::gen_ident(const Node::Ident& ident)
   {
     assert(m_anl.sym_table.count(ident.id) && "Mapping from Ident.id to Analysis.id missing");
     assert(false);
-    // aid_to_r.try_emplace(m_anl.sym_table.at(ident.id).id, IR::Reg(m_anl.sym_table.at(ident.id).type));
   }
   if (it2 == aid_to_l.end())
     m_stack.emplace(aid_to_r.at(key));
 
   if (it1 == aid_to_r.end())
     m_stack.emplace(aid_to_l.at(key));
-
-  /*
-  m_stack.emplace(m_anl);
-  if (m_g_table.find(ident.id) != m_g_table.end())
-  {
-    m_stack.emplace(m_g_table.at(ident.id));
-  }
-  else if (auto reg = find_local_sym(ident.id))
-  {
-    m_stack.emplace(reg.value());
-  }
-  else
-  {
-    assert(false);
-  }
-  */
 }
 
 void IRGen::gen_int(const Node::Int& int_)
@@ -774,8 +660,6 @@ void IRGen::gen_double(const Node::Double& double_)
 void IRGen::gen_string(const Node::String& string)
 {
   auto t = Type(Type::Ptr(std::make_shared<Type>(Type::Base::CHAR)));
-  // IR::Label l = IR::Label::create_rodata(Type(Type::Base::CHAR));
-  // auto lit = IR::Lit(string.val, Type(Type::Base::CHAR));
   IR::Label l = IR::Label::create_rodata(t);
   auto lit = IR::Lit(string.val, t);
   m_instructs->emplace_back(IR::GStore(l, lit));
@@ -793,15 +677,9 @@ void IRGen::gen_char(const Node::Char& c)
   m_stack.emplace(l);
 }
 
-void IRGen::gen_ref(const Node::TypeRef& ref)
-{
+void IRGen::gen_ref(const Node::TypeRef&) {}
 
-}
-
-void IRGen::gen_def(const Node::TypeDef& def)
-{
-
-}
+void IRGen::gen_def(const Node::TypeDef&) {}
 
 void IRGen::gen_asgn(const Node::Asgn& asgn)
 {
@@ -836,13 +714,10 @@ void IRGen::gen_asgn(const Node::Asgn& asgn)
     auto sym = m_anl.sym_table.at(asgn.id.id);
 
     size_t sz = Node::get_res_t(asgn.type)->size();
-    // auto allocc = IR::Allocc(sz);
 
     aid_to_r.try_emplace(sym.id, dest);
-    // auto top = IR::Lit(0, *asgn.type);
     auto top = IR::Lit(0, Type(Type::Base::I64));
     m_instructs->emplace_back(IR::Store(aid_to_r.at(sym.id), top));
-    // m_instructs->emplace_back(allocc);
     return;
   }
   if (asgn.val)
@@ -898,22 +773,6 @@ void IRGen::gen_asgn(const Node::Asgn& asgn)
         m_instructs->emplace_back(IR::Store(aid_to_r.at(key), top));
       }
     }
-  /*
-  /// if expr
-  asgn.val->accept(*this);
-  sym_table[asgn.id.id] = m_stack.top();
-  m_stack.pop();
-  /// if decl
-  /// ???
-  /// function:
-  IR::Label end_label = new_label();
-  m_instructs->emplace_back(IR::Jmp{ end_label });
-  m_instructs->emplace_back(IR::Label{ asgn.id.id });
-  asgn.val->accept(*this);
-  m_instructs->emplace_back(end_label);
-  /// struct:
-  m_instructs->emplace_back(IR::Alloc{ new_reg(), asgn.id.id });
-  */
 }
 
 void IRGen::gen_if(const Node::If& if_)
@@ -966,7 +825,6 @@ void IRGen::gen_if(const Node::If& if_)
     m_ctx_stack.push_back(ScopeCtx{ new_if_label, new_else_label, ScopeCtx::Kind::IF });
     gen_scope(*curr_if.scope);
     m_ctx_stack.pop_back();
-    // curr_if.scope->accept(*this);
 
     m_instructs->emplace_back(IR::Jmp{ end_label });
     m_instructs->emplace_back(new_else_label);
@@ -1040,11 +898,7 @@ void IRGen::gen_ret(const Node::Ret& ret_)
   }
   else
   {
-    /// ???
-    /// Should provide some sort of primitive for void returns
-    /// something like a VOID macro might work
-    /// we might skip this for now until types are fully supported
-    m_instructs->emplace_back(IR::Ret(IR::Lit(0, Type(Type::Base::I32))));
+    m_instructs->emplace_back(IR::Ret(IR::Lit(0, Type(Type::Base::VOID))));
   }
 }
 
@@ -1076,32 +930,6 @@ void IRGen::gen_call(const Node::Call& call)
   }
   m_stack.emplace(ret_reg);
   m_instructs->emplace_back(ir_call);
-  /*
-  auto sym = m_anl.sym_table.at(call.callable.id);
-  assert(sym.is_fn());
-  auto ext = std::get<Sema::Symbol::FnExt>(sym.ext);
-  IR::Reg ret_reg(sym.type);
-  // IR::Reg ret_reg((Type(Type::Base::I32)));
-  IR::Call ir_call(ret_reg);
-  ir_call.callable = call.callable.name;
-  for (int i = 0; i < call.args.size(); i++)
-  {
-    auto& expr = call.args[i];
-    expr->accept(m_visitor);
-    auto top = m_stack.top();
-    m_stack.pop();
-
-    if (IR::get_type(top) != ext.params[i].type)
-    {
-      coerce(top, ext.params[i].type);
-      top = m_stack.top();
-      m_stack.pop();
-    }
-    ir_call.args.emplace_back(top);
-  }
-  m_stack.emplace(ret_reg);
-  m_instructs->emplace_back(ir_call);
-  */
 }
 
 void IRGen::gen_scope(const Node::Scope& scope)
@@ -1116,3 +944,4 @@ std::vector<IR::Instruct> IRGen::gen()
     std::visit([this](const auto& t) { t->accept(m_visitor); }, v);
   return *m_instructs;
 }
+

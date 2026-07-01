@@ -2,13 +2,9 @@
 #define SEMA_H
 
 #include "parser.hpp"
-#include "tokenizer.hpp"
 #include "type.hpp"
 
 #include <cstdint>
-#include <map>
-#include <optional>
-#include <stack>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -17,29 +13,6 @@
 
 class Sema
 {
-  /*
-  struct Visitor : Node::DeclVisitor, Node::ExprVisitor, Node::StmtVisitor
-  {
-    Sema& m_sema;
-    explicit Visitor(Sema& sema) : m_sema(sema) {}
-
-    void visit(const Node::Func&) override;
-    void visit(const Node::Struct&) override;
-
-    void visit(const Node::UnExpr&) override;
-    void visit(const Node::BinExpr&) override;
-    void visit(const Node::Ident&) override;
-    void visit(const Node::Int&) override;
-    void visit(const Node::Call&) override;
-
-    void visit(const Node::Asgn&) override;
-    void visit(const Node::If&) override;
-    void visit(const Node::For&) override;
-    void visit(const Node::Ret&) override;
-    void visit(const Node::ExprStmt&) override;
-  };
-  */
-
 public:
   struct Symbol;
   struct VarExt;
@@ -129,19 +102,10 @@ public:
   void push_scope();
   void pop_scope();
 
-  /*
-  void register_struct_t(const Node::Struct& strct);
-  void register_union_t(const Node::Union& un);
-  void register_enum_t(const Node::Enum& en);
-  bool is_type(const std::string& name);
-  Type get_type(const std::string& name);
-  */
-
   explicit Sema(const std::vector<Node::Node>&);
   ~Sema();
   Sema::Analysis analyze();
 
-  // void analyze_type_usage(const std::shared_ptr<Type>&);
   void analyze_type_ref(const Node::TypeRef& ref);
   void analyze_type_def(const Node::TypeDef& def);
   ExprInfo analyze_expr(const std::shared_ptr<Node::Expr>&);
@@ -151,9 +115,6 @@ public:
 
   void analyze_scope(const Node::Scope&);
   void analyze_func(const Node::Func&);
-  void analyze_struct(const Node::Struct&);
-  void analyze_union(const Node::Union&);
-  void analyze_enum(const Node::Enum&);
   void analyze_namespace(const Node::Namespace&);
 
   ExprInfo analyze_bin_expr(Node::BinExpr&);
@@ -176,12 +137,9 @@ private:
   bool is_valid_type(const Type&);
   Scope* get_curr_scope();
   Module* load_module();
-  void populate_stc(const Node::Ident& base, const Type::Struct& stc_t);
-  void populate_stc_t(Type::Struct& stc_t);
 
 private:
   Sema::Analysis g_anl;
-  // Visitor m_visitor;
   std::vector<uint32_t> m_scope_stack;
   std::vector<std::unique_ptr<Scope>> m_scope_arena;
   std::vector<std::string> m_mang_pref;

@@ -7,7 +7,6 @@
 #include <optional>
 #include <variant>
 
-
 uint32_t Node::Ident::nid = 0;
 Parser::Parser(std::vector<Token>& tokens)
   : m_tokens(std::move(tokens)),
@@ -301,42 +300,6 @@ std::optional<std::variant<Node::TypeDef, Node::TypeRef>> Parser::parse_type()
   else if (auto ref = parse_type_ref())
     return ref;
   return {};
-  /*
-  auto tok = peek();
-  if (!tok.has_value() || !tok->value.has_value() || !m_pre_sema.is_type(tok->value.value()))
-    return {};
-
-  consume();
-  auto tp = std::make_shared<Type>(m_pre_sema.get_type(tok->value.value()));
-  for (; peek() && peek().value() == TokenTypes::Symbol::AST; consume())
-    tp = std::make_shared<Type>(Type::Ptr(tp));
-
-  return tp;
-  */
-
-  /*
-  if (auto btype = Type::string_to_base_t(tok->value.value()))
-  {
-    consume();
-    auto tp = std::make_shared<Type>(*btype);
-
-    for (; peek() && peek().value() == TokenTypes::Symbol::AST; consume())
-      tp = std::make_shared<Type>(Type::Ptr(tp));
-
-    return tp;
-  }
-  else
-  {
-    consume();
-    auto tp = std::make_shared<Type>(Type::Struct(tok->value.value()));
-
-    for (; peek() && peek().value() == TokenTypes::Symbol::AST; consume())
-      tp = std::make_shared<Type>(Type::Ptr(tp));
-
-    return tp;
-  }
-  */
-  // return {};
 }
 
 std::optional<Node::Path> Parser::parse_lit_path()
@@ -430,103 +393,6 @@ Parser::parse_expr(std::optional<std::shared_ptr<Node::Expr>> lhs, std::optional
   return lhs;
 }
 
-/*
-std::optional<std::shared_ptr<Node::Expr>>
-Parser::parse_un_expr()
-{
-  if (peek() && peek().value() == TokenTypes::Symbol::AMP)
-  {
-    consume();
-    if (auto un_expr = parse_un_expr())
-      return std::make_shared<Node::UnExpr>(un_expr.value(), UnOp::ADDR_OF, true);
-
-    Utils::panic("While parsing UnExpr, couldn't find operand");
-    return {};
-  }
-
-  else if (peek() && peek().value() == TokenTypes::Symbol::AST)
-  {
-    consume();
-    if (auto un_expr = parse_un_expr())
-      return std::make_shared<Node::UnExpr>(un_expr.value(), UnOp::DEREF, true);
-
-    Utils::panic("While parsing UnExpr, couldn't find operand");
-    return {};
-  }
-  else if (peek() && peek().value() == TokenTypes::Symbol::INC)
-  {
-    consume();
-    // consume();
-
-    if (auto un_expr = parse_un_expr())
-      return std::make_shared<Node::UnExpr>(un_expr.value(), UnOp::INC, true);
-
-    Utils::panic("While parsing UnExpr, couldn't find operand");
-    return {};
-  }
-  else if (peek() && peek().value() == TokenTypes::Symbol::DEC)
-  {
-    consume();
-    // consume();
-
-    if (auto un_expr = parse_un_expr())
-      return std::make_shared<Node::UnExpr>(un_expr.value(), UnOp::DEC, true);
-
-    Utils::panic("While parsing UnExpr, couldn't find operand");
-    return {};
-  }
-  else if (peek() && peek().value() == TokenTypes::Symbol::SUB)
-  {
-    consume();
-    if (auto un_expr = parse_un_expr())
-      return std::make_shared<Node::UnExpr>(un_expr.value(), UnOp::NEG, true);
-
-    Utils::panic("While parsing UnExpr, couldn't find operand");
-    return {};
-  }
-  
-  std::optional<std::shared_ptr<Node::Expr>> lit;
-  if (auto plit = parse_lit())
-    lit = *plit;
-  else if (auto pexpr = parse_paren_expr())
-    lit = *pexpr;
-  else
-    return {};
-
-  while (true)
-  {
-    if (peek() && peek().value() == TokenTypes::Symbol::INC)
-    {
-      consume();
-      // consume();
-      lit = std::make_shared<Node::UnExpr>(lit.value(), UnOp::INC, false);
-    }
-    else if (peek() && peek().value() == TokenTypes::Symbol::DEC)
-    {
-      consume();
-      // consume();
-      lit = std::make_shared<Node::UnExpr>(lit.value(), UnOp::DEC, false);
-    }
-    else if (peek() && *peek() == TokenTypes::Symbol::LBRA)
-    {
-      consume();
-      auto expr = parse_expr();
-      assert(expr.has_value());
-
-      lit = std::make_shared<Node::BinExpr>(lit.value(), BinOp::IDX, expr.value());
-      assert(lit.has_value() && "idx of operator expected expression");
-
-      assert(peek() && *peek() == TokenTypes::Symbol::RBRA);
-      consume();
-    }
-    else
-      break;
-  }
-
-  return lit;
-}
-*/
-
 std::optional<std::shared_ptr<Node::Expr>> Parser::parse_paren_expr()
 {
   if (peek() && peek().value() == TokenTypes::Symbol::LPAR)
@@ -543,11 +409,6 @@ std::optional<std::shared_ptr<Node::Expr>> Parser::parse_paren_expr()
 std::optional<std::shared_ptr<Node::Expr>>
 Parser::parse_bin_expr(std::optional<std::shared_ptr<Node::Expr>> lhs, std::optional<BinOp> prev_op)
 {
-  /*
-  const int prev_prec = (prev_op.has_value() ? precedence(prev_op.value()) : 0);
-  std::optional<std::shared_ptr<Node::Expr>> rhs;
-  */
-
   auto parse_paren_expr = [&]() -> std::optional<std::shared_ptr<Node::Expr>>
   {
     RollbackGuard guard(m_index);
@@ -709,137 +570,7 @@ Parser::parse_bin_expr(std::optional<std::shared_ptr<Node::Expr>> lhs, std::opti
   if (!lhs) res = node;
   else res = std::make_shared<Node::BinExpr>(lhs.value(), prev_op.value(), node);
   return res;
-
-  /*
-
-  auto top = std::make_shared<Node::UnExpr>(nullptr, UnOp::NOT, true);
-  std::shared_ptr<Node::Expr> prev = top;
-  for (auto&& [cur, uop] = std::pair{ top, parse_un_op() }; uop; uop = parse_un_op())
-  {
-    assert(cprec > precedence(uop.value()) && "Unexpected precedence chain");
-    cprec = precedence(uop.value());
-
-    prev = cur;
-    cur->expr = std::make_shared<Node::UnExpr>(cur->expr, UnOp::NOT, true);
-    cur->op = uop.value();
-    cur = std::static_pointer_cast<Node::UnExpr>(cur->expr);
-  }
-
-  auto lit = parse_lit();
-  if (!lit && peek() && peek() == TokenTypes::Symbol::LPAR) prev = parse_paren_expr().value();
-  else if (!lit)
-  {
-    if (!lhs && prev == top) return {};
-    else assert(false && "Expected expression");
-  }
-
-  if (auto ident = std::dynamic_pointer_cast<Node::Ident>(lit.value()) && peek() && peek() == TokenTypes::Symbol::LPAR)
-    prev = std::make_shared<Node::Call>(parse_call_expr().value());
-  else
-  {
-    auto vprev = std::static_pointer_cast<Node::UnExpr>(prev);
-    if (!vprev->expr) prev = lit.value();
-    else vprev->expr = lit.value();
-  }
-
-  std::shared_ptr<Node::Expr> res = lhs ? std::make_shared<Node::BinExpr>(lhs.value(), prev_op.value(), prev) : prev;
-  cprec = lhs ? precedence(prev_op.value()) : 1000;
-  while (auto uop = parse_un_op())
-  {
-    if (lhs && precedence(prev_op.value()) > precedence(uop.value()))
-    {
-      res = std::make_shared<Node::UnExpr>(res, uop.value(), false);
-      prev = res;
-    }
-    assert(cprec < precedence(uop.value()) && "Unexpected precedence chain");
-    cprec = precedence(uop.value());
-
-    prev = std::make_shared<Node::UnExpr>(prev, uop.value(), false);
-  }
-
-  auto bop = parse_bin_op();
-  if (!bop) return res;
-  else return parse_bin_expr(res, bop);
-  */
-
-
-  
-
-  /*
-  if (auto p_expr = parse_paren_expr())
-    rhs = p_expr.value();
-
-  else if (auto call = parse_call_expr())
-    rhs = std::make_shared<Node::Call>(call.value());
-
-  else
-    rhs = parse_un_expr();
-    // rhs = parse_lit();
-
-  if (!rhs.has_value())
-  {
-    if (lhs.has_value())
-      Utils::panic("Expected an expression");
-
-    return {};
-  }
-
-  auto next_op = parse_bin_op();
-  if (!next_op.has_value())
-  {
-    auto ret = (
-      !lhs.has_value() ?
-      rhs :
-      std::make_shared<Node::BinExpr>(lhs.value(), prev_op.value(), rhs.value())
-    );
-    // ret = parse_un_expr();
-    return ret;
-  }
-
-  int next_prec = precedence(next_op.value());
-  if (
-    next_prec > prev_prec ||
-    (next_op.value() == prev_op && is_right_assoc(next_op.value()))
-  )
-  {
-    auto expr = parse_expr(rhs.value(), next_op);
-    assert(expr.has_value() && "Must be true");
-
-    if (!prev_op)
-      return expr;
-
-    Node::BinExpr res(lhs.value(), prev_op.value(), expr.value());
-    std::optional<std::shared_ptr<Node::Expr>> ret = std::make_shared<Node::BinExpr>(res);
-    // ret = parse_un_expr(&ret);
-    return ret;
-  }
-  else
-  {
-    Node::BinExpr new_lhs(lhs.value(), prev_op.value(), rhs.value());
-    auto ret = parse_expr(std::make_shared<Node::BinExpr>(new_lhs), next_op);
-    // ret = parse_un_expr(&ret);
-    return ret;
-  }
-  */
 }
-
-/*
-std::optional<Node::Call> Parser::parse_call_expr()
-{
-  if (!peek() || peek() != TokenTypes::Literal::IDENT) return {};
-  auto saved_midx = m_index;
-
-  Node::Call call(*consume().value);
-  if (auto arg_list = parse_arg_list()) call.args = arg_list.value();
-  else
-  {
-    m_index = saved_midx;
-    return {};
-  }
-
-  return call;
-}
-*/
 
 std::optional<Node::If> Parser::parse_if_stmt()
 {
@@ -1018,7 +749,6 @@ std::optional<Node::Struct> Parser::parse_struct()
       assert(peek() && peek() == TokenTypes::Literal::IDENT);
       auto mem = Node::Ident(consume().value.value());
       struct_node.members.emplace_back(tp.value(), mem);
-      // stype.insert_mem(Node::get_res_t(tp.value()), mem.name);
       
       assert(peek() && peek() == TokenTypes::Symbol::SEMICOL);
       consume(); // ;
@@ -1031,20 +761,8 @@ std::optional<Node::Struct> Parser::parse_struct()
       else
         Utils::panic(msg + std::string("Nothing"));
     }
-    /*
-    auto t1 = parse_type();
-    auto t2 = consume();
-
-    assert(t1.has_value() && t2 == TokenTypes::Literal::IDENT);
-
-    struct_node.members.emplace_back(**t1, Node::Ident(t2.value.value()));
-
-    consume(); // ;
-    */
   }
   consume(); // }
-  // consume(); // ;
-  // m_pre_sema.register_struct_t(struct_node);
   return struct_node;
 }
 
@@ -1080,19 +798,8 @@ std::optional<Node::Union> Parser::parse_union()
       else
         Utils::panic(msg + std::string("Nothing"));
     }
-    /*
-    auto t1 = parse_type();
-    auto t2 = consume();
-
-    assert(t1.has_value() && t2 == TokenTypes::Literal::IDENT);
-    union_node.members.emplace_back(**t1, Node::Ident(t2.value.value()));
-
-    consume(); // ;
-    */
   }
   consume(); // }
-  // consume(); // ;
-  // m_pre_sema.register_union_t(union_node);
   return union_node;
 }
 
@@ -1154,7 +861,6 @@ std::optional<Node::Enum> Parser::parse_enum()
         Node::TypeRef(std::make_shared<Type>(Type::Base::I32)),
         en.value.value(),
         prev
-        // std::make_shared<Node::BinExpr>(prev, BinOp::ADD, std::make_shared<Node::Int>(1))
       );
       enm.enums.push_back(asgn);
     }
@@ -1167,12 +873,8 @@ std::optional<Node::Enum> Parser::parse_enum()
     }
   }
   consume(); // }
-  // consume(); // ;
-  
-
   auto type = std::make_shared<Type>(Type::Enum(enm.id.name));
   m_tracker.push_type(enm.id.name, type);
-  // m_pre_sema.register_enum_t(enm);
   return enm;
 }
 
@@ -1238,7 +940,6 @@ std::optional<Node::For> Parser::parse_for_stmt()
     loop.init = std::make_shared<Node::Asgn>(asgn.value());
   else
     consume(); // ;
-  // consume(); // ;
 
   if (auto cond = parse_expr())
     loop.cond = cond.value();
@@ -1261,15 +962,6 @@ std::optional<std::shared_ptr<Node::Decl>> Parser::parse_decl()
 {
   if (peek() && peek().value() == TokenTypes::Keyword::FN)
     return std::make_shared<Node::Func>(parse_func().value());
-  // Redundant; parsed in parse_type_def
-  /*
-  else if (peek() && peek().value() == TokenTypes::Keyword::STRUCT)
-    return std::make_shared<Node::Struct>(parse_struct().value());
-  else if (peek() && peek().value() == TokenTypes::Keyword::UNION)
-    return std::make_shared<Node::Union>(parse_union().value());
-  else if (peek() && peek().value() == TokenTypes::Keyword::ENUM)
-    return std::make_shared<Node::Enum>(parse_enum().value());
-  */
   else if (peek() && peek().value() == TokenTypes::Keyword::NAMEPSACE)
     return std::make_shared<Node::Namespace>(parse_namespace().value());
   return {};
@@ -1291,20 +983,7 @@ void Parser::parse_arr(std::variant<Node::TypeDef, Node::TypeRef>& type)
   auto tp = std::visit(
     Utils::overloaded
     {
-      [this](Node::TypeDef& td) -> std::shared_ptr<Type>
-      {
-        /*
-        auto ret = std::visit(
-          Utils::overloaded
-          {
-            [this](const std::shared_ptr<Node::Struct>& stc) -> Type { return m_pre_sema.get_type(stc->id.name); },
-            [this](const std::shared_ptr<Node::Union>& uni) -> Type { return m_pre_sema.get_type(uni->id.name); },
-            [this](const std::shared_ptr<Node::Enum>& enm) -> Type { return m_pre_sema.get_type(enm->id.name); },
-          }, td.type
-        );
-        */
-        return td.res_t;
-      },
+      [this](Node::TypeDef& td) -> std::shared_ptr<Type> { return td.res_t; },
       [](Node::TypeRef& tr) -> std::shared_ptr<Type> { return tr.res_t; }
     }, type
   );
@@ -1461,3 +1140,4 @@ std::optional<std::shared_ptr<Node::Stmt>> Parser::parse_stmt()
 }
 
 Token Parser::consume() { return m_tokens[m_index++]; }
+

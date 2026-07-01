@@ -5,7 +5,6 @@
 #include <iomanip>
 #include <memory>
 #include <optional>
-#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -196,8 +195,6 @@ namespace Node
     std::string name;
 
     explicit Ident(std::string name) : id(nid++), name(std::move(name)) {}
-    // Ident(const Ident& other) = delete;
-    // Ident& operator=(const Ident& other) = delete;
     Ident(const Ident& other) : id(nid++), name(other.name) {}
     Ident& operator=(const Ident& other)
     {
@@ -441,16 +438,9 @@ namespace Node
     void dump(int ident) const override {
       std::cout << std::string(ident, '\t') << "Node::Struct: " << id.name << " {\n";
       std::cout << std::string(ident + 1, '\t') << "SCOPE";
-      /*
-      for (const auto& [type, member_id] : members)
-      {
-        std::cout << std::string(ident + 1, '\t') << type << " " << member_id.name << "\n";
-      }
-      */
       std::cout << std::string(ident, '\t') << "}\n";
     }
     Ident id;
-    // std::optional<Scope> scp;
     std::vector<std::pair<std::variant<TypeDef, TypeRef>, Ident>> members;
   };
 
@@ -461,16 +451,9 @@ namespace Node
     void dump(int ident) const override {
       std::cout << std::string(ident, '\t') << "Node::Union: " << id.name << " {\n";
       std::cout << std::string(ident + 1, '\t') << "SCOPE";
-      /*
-      for (const auto& [type, member_id] : members)
-      {
-        std::cout << std::string(ident + 1, '\t') << member_id.name << "\n";
-      }
-      */
       std::cout << std::string(ident, '\t') << "}\n";
     }
     Ident id;
-    // std::optional<Scope> scp;
     std::vector<std::pair<std::variant<TypeDef, TypeRef>, Ident>> members;
   };
 
@@ -491,12 +474,6 @@ namespace Node
             [&](const std::shared_ptr<Decl>& decl) { decl->dump(ident + 2); },
           }, term
         );
-      /*
-      for (const auto& [type, member_id] : members)
-      {
-        std::cout << std::string(ident + 1, '\t') << member_id.name << "\n";
-      }
-      */
       std::cout << std::string(ident, '\t') << "}\n";
     }
     Ident id;
@@ -727,7 +704,6 @@ public:
   bool is_right_assoc(const UnOp& unop);
   std::optional<std::shared_ptr<Node::Expr>> parse_paren_expr();
   std::optional<std::shared_ptr<Node::Expr>> parse_bin_expr(std::optional<std::shared_ptr<Node::Expr>> lhs, std::optional<BinOp> prev_op);
-  // std::optional<std::shared_ptr<Node::Expr>> parse_un_expr();
   std::optional<std::shared_ptr<Node::Expr>>
     parse_expr(std::optional<std::shared_ptr<Node::Expr>> lhs = std::nullopt, std::optional<BinOp> prev_op = std::nullopt);
 
@@ -757,7 +733,6 @@ public:
   std::optional<Node::Ret> parse_ret_stmt();
   std::optional<std::vector<Node::Param>> parse_param_list();
   std::optional<std::vector<std::shared_ptr<Node::Expr>>> parse_arg_list();
-  // std::optional<Node::Call> parse_call_expr();
   std::optional<Node::Node> parse_node();
   std::optional<Node::TypeRef> parse_type_ref();
   std::optional<Node::TypeDef> parse_type_def();

@@ -43,6 +43,4 @@ private:
   static inline std::ostream& stream = std::cout;
 };
 
-
-
-#endif //LOGGER_H
+#endif // LOGGER_H

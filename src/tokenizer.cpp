@@ -15,7 +15,6 @@ std::vector<Token> Tokenizer::tokenize()
     {
       while (peek().has_value() && std::isdigit(peek().value()))
       {
-        // Logger::debug("digit index: ", m_index);
         buffer += m_src[m_index];
         consume();
       }
@@ -50,49 +49,6 @@ std::vector<Token> Tokenizer::tokenize()
       else if (buffer == "false") { tokens.emplace_back(TokenTypes::Literal::INT, "0"); }
       else { tokens.emplace_back(TokenTypes::Literal::IDENT, buffer); }
       buffer.clear();
-      /*
-      if (buffer == "return")
-      {
-        tokens.emplace_back(TokenTypes::Keyword::RET);
-      }
-      else if (buffer == "if")
-      {
-        tokens.emplace_back(TokenTypes::Keyword::IF);
-      }
-      else if (buffer == "else")
-      {
-        tokens.emplace_back(TokenTypes::Keyword::ELSE);
-      }
-      else if (buffer == "fn")
-      {
-        tokens.emplace_back(TokenTypes::Keyword::FN);
-      }
-      else if (buffer == "for")
-      {
-        tokens.emplace_back(TokenTypes::Keyword::FOR);
-      }
-      else if (buffer == "continue")
-      {
-        tokens.emplace_back(TokenTypes::Keyword::CONTINUE);
-      }
-      else if (buffer == "break")
-      {
-        tokens.emplace_back(TokenTypes::Keyword::BREAK);
-      }
-      else if (buffer == "while")
-      {
-        tokens.emplace_back(TokenTypes::Keyword::WHILE);
-      }
-      else if (buffer == "import")
-      {
-        tokens.emplace_back(TokenTypes::Keyword::IMPORT);
-      }
-      else if (buffer == "struct")
-      {
-        tokens.emplace_back(TokenTypes::Keyword::STRUCT);
-      }
-      */
-      // else
     }
     else if (peek().value() == '=')
     {

@@ -5,8 +5,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <cstdint>
-#include <numeric>
 #include <sstream>
 #include <string>
 #include <memory>
@@ -63,14 +61,6 @@ struct Type
       if (align != 0)
         size += tp->alignment() - align;
 
-      /*
-      size_t cur_off = std::accumulate(
-        body->types.begin(), body->types.end(), 0LL,
-        [&](long long off, const std::pair<std::string, std::shared_ptr<Type>>& p)
-        { return off + p.second->size(); }
-      );
-      */
-      
       body->offsets[mem] = size;
       body->types.try_emplace(mem, tp);
       size += tp->size();
@@ -151,7 +141,6 @@ struct Type
   {
     explicit Enum(std::string name) : name(std::move(name)), state(TypeState::UNRESOLVED) {}
     std::string name;
-    // std::shared_ptr<Type> tag;
     std::unordered_map<std::string, std::shared_ptr<void>> enums;
     TypeState state;
     bool operator==(const Enum& other) const { return name == other.name; };
@@ -173,19 +162,7 @@ struct Type
   };
 
   using TypeVar = std::variant<Base, Ptr, Arr, Struct, Union, Enum, Func>;
-
   TypeVar type;
-  /*
-  explicit Type(std::string id)
-  {
-    if (auto base_t = string_to_base_t(id))
-    {
-      type = *base_t;
-      return;
-    }
-    type = Struct{ std::move(id) };
-  }
-  */
 
   explicit Type (TypeVar tp)
   { type = std::move(tp); }
@@ -291,30 +268,10 @@ struct Type
         [](const Struct& st) -> size_t
         {
           return st.size;
-          /*
-          size_t tot = std::accumulate(
-            st.body->types.begin(), st.body->types.end(), 0LL,
-            [&](long long off, const std::pair<std::string, std::shared_ptr<Type>>& p) { return off + p.second->size(); }
-          );
-          return tot;
-          auto it = std::max_element(
-            st.body->offsets.begin(), st.body->offsets.end(),
-            [&](const auto& a, const auto& b) { return a.second < b.second; }
-          );
-          return it->second + st.body->types.at(it->first)->size();
-          */
         },
         [](const Union& un) -> size_t
         {
           return un.size;
-          /*
-          if (un.body->types.empty()) return 0;
-          auto it = std::max_element(
-            un.body->types.begin(), un.body->types.end(),
-            [&](const auto& a, const auto& b) { return a.second->size() < b.second->size(); }
-          );
-          return it->second->size();
-          */
         },
         [](const Enum& en) -> size_t
         {

@@ -53,8 +53,6 @@ int main(int argc, char* argv[])
   for (auto& token : tokens) // Debug: Tokens
     Logger::debug(token);
 
-  // Sema pre_sema({});
-
   Logger::debug("Parsing started");
   Parser parser(tokens);
   std::vector<Node::Node> nodes = parser.parse_prog();
@@ -82,20 +80,8 @@ int main(int argc, char* argv[])
   Logger::debug("IR:");
   for (auto& instruct : ir_instructs) // Debug: Instructions
     Logger::debug(instruct);
-    // std::cout << instruct << '\n';
 
   std::cout.flush();
-  // Logger::log(Logger::Level::DEBUG, instruct, '\n');
-
-  /*
-  IROptimizer optimizer(ir_instructs);
-  optimizer.optimize();
-
-
-  Logger::log(Logger::Level::DEBUG, "OPTIMIZED IR:", '\n');
-  for (auto& instruct : ir_instructs) // Debug: Instructions
-    std::cout << instruct << '\n';
-  */
 
   Logger::debug("Code Gen started");
   CodeGen code_gen(ir_instructs);
@@ -123,7 +109,6 @@ int main(int argc, char* argv[])
   std::string line;
   while (std::getline(iss, line))
     Logger::debug(line);
-
 
   std::ofstream outfile(output_file_path);
   if (outfile.is_open())

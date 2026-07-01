@@ -86,7 +86,6 @@ namespace IR
 
     static Label create_rodata(Type tp)
     {
-      // assert(tp.is_base_t());
       return Label("LC" + std::to_string(nid), RODATA, std::move(tp));
     }
 
@@ -160,15 +159,6 @@ namespace IR
 
   inline const Type& get_type(const IR::Operand& op)
   {
-    /*
-    return std::visit(
-      Utils::overloaded
-      {
-        [](const IR::Mem& mem) -> const Type& { return *mem.type.inner(); },
-        [](auto&& arg) -> const Type& { return arg.type; }
-      }, op
-    );
-    */
     return std::visit([](auto&& arg) -> const Type& { return arg.type; }, op);
   }
   
@@ -180,24 +170,12 @@ namespace IR
     explicit Store(Operand d, Operand v) : dest(std::move(d)), val(std::move(v))
     { assert(!std::holds_alternative<Lit>(dest) && "IR::Store->dest can't be literal"); }
 
-    /*
-    explicit Store(Operand d) : dest(std::move(d))
-    { assert(!std::holds_alternative<Lit>(dest) && "IR::Store->dest can't be literal"); }
-    */
-
     inline friend std::ostream& operator<<(std::ostream& os, const Store& store)
     {
-      /*
-      if (auto reg = std::get_if<IR::Reg>(&store.dest))
-        os << *reg << " = " << store.address;
-      else if (auto str = std::get_if<Label>(&store.dest))
-        os << *str << " = " << store.address;
-      */
       os << store.dest << " = " << store.val;
       return os;
     }
   };
-
 
   struct GStore
   {
@@ -305,7 +283,6 @@ namespace IR
 
   struct Call
   {
-    // std::string callable;
     Operand callable;
     std::vector<Operand> args;
     Operand dest;
@@ -425,19 +402,6 @@ namespace IR
     }
   };
 
-  struct Allocc
-  {
-    explicit Allocc(size_t sz) : size(sz) {}
-    size_t size;
-
-    inline friend std::ostream& operator<<(std::ostream& os, const Allocc& alloc)
-    {
-      os << "[ALLOCC] = ";
-      os << alloc.size;
-      return os;
-    }
-  };
-
   struct Alloca
   {
     Operand dest;
@@ -467,7 +431,7 @@ namespace IR
   using Instruct = std::variant<
     GStore, Store, Binop, Unop,
     Jmp, Jeq, Jne, Label, Call,
-    std::shared_ptr<Func>, ImpCast, Alloca, Allocc, 
+    std::shared_ptr<Func>, ImpCast, Alloca, 
     Ret, Nop
   >;
 
@@ -503,7 +467,6 @@ namespace IR
     os << *fn;
     return os;
   }
-
 }
 
 template <>
@@ -530,7 +493,6 @@ class IRGen
 
     void visit(const Node::UnExpr&) override;
     void visit(const Node::BinExpr&) override;
-    // void visit(const Node::MemberExpr&) override;
     void visit(const Node::Ident&) override;
     void visit(const Node::Path&) override;
     void visit(const Node::Int&) override;
@@ -562,14 +524,12 @@ private:
   void gen_namespace(const Node::Namespace&);
   void gen_un_expr(const Node::UnExpr&);
   void gen_bin_expr(const Node::BinExpr&);
-  // void gen_mem_expr(const Node::MemberExpr&);
   void gen_ident(const Node::Ident&);
   void gen_path(const Node::Path&);
   void gen_int(const Node::Int&);
   void gen_double(const Node::Double&);
   void gen_string(const Node::String&);
   void gen_char(const Node::Char&);
-  // void gen_member(const Node::Member& mem);
   void gen_asgn(const Node::Asgn&);
 
   void gen_ref(const Node::TypeRef&);

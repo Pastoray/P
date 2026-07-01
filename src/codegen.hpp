@@ -8,7 +8,6 @@
 #include <variant>
 #include <vector>
 #include <sstream>
-#include <queue>
 
 enum class Suffix
 {
@@ -328,10 +327,6 @@ struct ASMOperand;
 
 struct RegPool
 {
-  /*
-  std::queue<Reg::GPR> available;
-  explicit RegPool() : available({ Reg::GPR::RAX, Reg::GPR::RDX, Reg::GPR::RCX, Reg::GPR::R8, Reg::GPR::R9 }) {}
-  */
   std::unordered_map<Reg::GPR, int> gpr_usage;
   std::unordered_map<Reg::FPR, int> fpr_usage;
 
@@ -413,32 +408,6 @@ struct RegPool
     assert(fpr_usage.at(to128(reg)) > 0 && "lock/unlock mismatch");
     fpr_usage.at(to128(reg))--;
   }
-
-  /*
-  Reg::GPR alloc(uint16_t sz)
-  {
-    assert(!available.empty());
-    auto reg = available.front();
-    available.pop();
-    return as_sz(reg, sz);
-  }
-
-  Reg::GPR alloc(Reg::GPR gpr)
-  {
-    for (int i = 0; i < available.size(); i++)
-    {
-      auto top = available.front();
-      available.pop();
-      if (gpr == to32(top) || gpr == to64(top))
-        return gpr;
-      available.push(top);
-    }
-    assert(false && "Unavailable register...");
-  }
-
-  void free(Reg::GPR reg)
-  { available.push(to64(reg)); }
-  */
 };
 
 class CodeGen;
@@ -515,50 +484,6 @@ public:
     );
   }
 
-  /*
-  void resize(const Type& new_t, std::stringstream& m_text)
-  {
-    m_text << "# resize (start)\n\t";
-    if (indirect)
-    {
-      type = new_t;
-      return;
-      assert(false && "Memory read/write changing size...");
-    }
-
-    uint32_t old_sz = type.size();
-    uint32_t new_sz = new_t.size();
-
-    if (new_sz == old_sz)
-    {
-      type = new_t;
-      m_text << "# resize (end) [skip]\n\t";
-      return;
-    }
-
-    if (new_sz > old_sz)
-    {
-      std::pair<int, int> p = { old_sz, new_sz };
-      if (m_ext_opc.find(p) == m_ext_opc.end())
-        assert(false && "Conversion not allowed...");
-
-      Reg::GPR src = as_sz(base_reg, old_sz);
-      Reg::GPR dst = as_sz(base_reg, new_sz);
-      m_text << m_ext_opc[p] << " " << src << ", " << dst << "\n\t";
-    }
-    else
-    {
-      m_text << "# resize (downcast)\n\t";
-      // if (new_sz == 4) reg = RegPool::to_32(reg);
-      // else if (new_sz == 8) reg = RegPool::to_64(reg);
-      // else assert(false);
-    }
-    // osize = new_sz;
-    type = new_t;
-    m_text << "# resize (end)\n\t";
-  }
-  */
-
   friend std::ostream& operator<<(std::ostream& os, const PreOper& po)
   {
     auto print_reg = [&os](const auto& reg) { os << reg; };
@@ -616,18 +541,8 @@ private:
       std::string operator()(const IR::Reg& r) const { return std::to_string(gen->reg_offset(r)) + "(%rbp)"; }
       std::string operator()(const IR::Lit& l) const
       {
-        // static int lc_cnt = 0;
         if (l.is_float())
-        {
-          /*
-          std::string lc = ".LC" + std::to_string(lc_cnt++);
-          auto old_prec = gen->m_rodata.precision();
-          gen->m_rodata << lc << ":\n\t\t" << ".double " << std::setprecision(17) << l.as_float() << "\n\t";
-          gen->m_rodata.precision(old_prec);
-          return lc + "(%rip)";
-          */
-          assert(false);
-        }
+        { assert(false); }
         else if (l.is_str()) assert(false && "NYI");
         else return "$" + std::to_string(l.as_int());
       }
@@ -656,97 +571,7 @@ private:
       { return l.name + ((l.kind == IR::Label::BSS) || (l.kind == IR::Label::RODATA) ? "(%rip)" : ""); }
     };
     return std::visit(Formatter{this}, oper);
-    /*
-    return std::visit(
-      Utils::overloaded
-      {
-        [this](IR::Reg& r) { return std::to_string(reg_offset(r)) + "(%rbp)"; },
-        [this](IR::Lit& l)
-        {
-          static int lc_cnt = 0;
-          if (l.is_float())
-          {
-            std::string lc = ".LC" + std::to_string(lc_cnt++);
-            m_rodata << lc << ":\n\t" << ".double " << l.as_float();
-            return lc + "(%rip)";
-          }
-          else if (l.is_str()) assert(false && "NYI");
-          else return "$" + std::to_string(l.as_int());
-        },
-        [this](IR::Mem& m)
-        {
-          std::stringstream res;
-          if (m.disp)
-            std::visit(
-              Utils::overloaded
-              {
-                [&res](const IR::Lit& l)   { res << "$" + std::to_string(l.value); },
-                [&res](const IR::Label& l) { res << l.name; }
-              }, m.disp.value()
-            );
-
-          if (m.base || m.index || m.scale)
-          {
-            res << "(";
-            if (m.base) res << std::to_string(reg_offset(m.base.value())) + "(%rbp)";
-            if (m.index || m.scale)
-            {
-              res << ", ";
-              if (m.index) res << std::to_string(reg_offset(m.index.value())) + "(%rbp)";
-              if (m.scale) res << ", " << "$" + std::to_string(m.scale.value().value);
-            }
-            res << ")";
-          }
-          return res.str();
-        },
-        [this](IR::Label& l) { return l.name; }
-      }, oper
-    );
-    */
   }
-  /*
-  std::string format_operand(IR::Lit& l)
-  {
-    return "$" + std::to_string(l.value); 
-  }
-  std::string format_operand(IR::Reg& r)
-  {
-    return std::to_string(reg_offset(r)) + "(%rbp)"; 
-  }
-
-  std::string format_operand(IR::Mem& m)
-  {
-    std::stringstream res;
-    if (m.disp)
-      std::visit(
-        Utils::overloaded
-        {
-          [&res](const IR::Lit& l)   { res << "$" + std::to_string(l.value); },
-          [&res](const IR::Label& l) { res << l.name; }
-        }, m.disp.value()
-      );
-
-    if (m.base || m.index || m.scale)
-    {
-      res << "(";
-      if (m.base) res << std::to_string(reg_offset(m.base.value())) + "(%rbp)";
-      if (m.index || m.scale)
-      {
-        res << ", ";
-        if (m.index) res << std::to_string(reg_offset(m.index.value())) + "(%rbp)";
-        if (m.scale) res << ", " << "$" + std::to_string(m.scale.value().value);
-      }
-      res << ")";
-    }
-    return res.str();
-  }
-
-  std::string format_operand(IR::Label& l)
-  {
-    return l.name; 
-  }
-  */
-
   void precomp_stack_size(const IR::Label& l, const std::vector<IR::Instruct>& inst);
 
   void gen_instr(IR::Instruct& instr);
@@ -760,24 +585,17 @@ private:
   void gen_label(IR::Label& label);
   void gen_fn(IR::Func& fn);
   void gen_call(IR::Call& call);
-  void gen_param(IR::Param& param);
   void gen_params(std::vector<IR::Param>& params);
   void gen_ret(IR::Ret& ret);
   void gen_alloca(IR::Alloca& alc);
-  void gen_allocc(IR::Allocc& alc);
   void gen_impc(IR::ImpCast& impc);
   void gen_nop(IR::Nop& nop);
   void cleanup_stack();
   static Suffix sfx(const ASMOperand& oper);
   static Suffix sfx(OperandPtr oper);
   static Suffix sfx(uint32_t sz);
-  // static Suffix get_com_sfx(OperandPtr oper1, OperandPtr oper2);
-  // void promote(PreOper& oper1, PreOper& oper2);
-  // uint32_t coerce_common(PreOper&, PreOper&);
   static uint32_t oper_sz(OperandPtr oper);
   int32_t reg_offset(const IR::Reg& reg);
-  // PreOper prepare(const IR::Operand& oper);
-  // PreOper prepare(PreOper&& oper);
 
   PreOper prepare_oper(OperandPtr oper);
   PreOper prepare_dest(OperandPtr oper);
@@ -785,30 +603,6 @@ private:
   PreOper prepare_dest(IR::Operand* oper);
   PreOper prepare_oper(PreOper* oper);
   PreOper prepare_dest(PreOper* oper);
-  // GPR prepare(OperandPtr oper);
-  // GPR prepare(const GPR& oper);
-
-  // void MOV(OperandPtr lhs, OperandPtr rhs);
-  /*
-  void ASG(OperandPtr lhs, OperandPtr rhs, OperandPtr dest);
-  void ADD(OperandPtr lhs, OperandPtr rhs, OperandPtr dest);
-  void SUB(OperandPtr lhs, OperandPtr rhs, OperandPtr dest);
-  void MUL(OperandPtr lhs, OperandPtr rhs, OperandPtr dest);
-  void DIV(OperandPtr lhs, OperandPtr rhs, OperandPtr dest);
-  void CMP(OperandPtr lhs, OperandPtr rhs);
-  void RSH(OperandPtr lhs, OperandPtr rhs, OperandPtr dest);
-  void LSH(OperandPtr lhs, OperandPtr rhs, OperandPtr dest);
-  void OR(OperandPtr lhs, OperandPtr rhs, OperandPtr dest);
-  void AND(OperandPtr lhs, OperandPtr rhs, OperandPtr dest);
-  void XOR(OperandPtr lhs, OperandPtr rhs, OperandPtr dest);
-  void LT(OperandPtr lhs, OperandPtr rhs, OperandPtr dest);
-  void GT(OperandPtr lhs, OperandPtr rhs, OperandPtr dest);
-  void LTE(OperandPtr lhs, OperandPtr rhs, OperandPtr dest);
-  void GTE(OperandPtr lhs, OperandPtr rhs, OperandPtr dest);
-  void EQ(OperandPtr lhs, OperandPtr rhs, OperandPtr dest);
-  void NEQ(OperandPtr lhs, OperandPtr rhs, OperandPtr dest);
-  void emit_setcc(const std::string& set_op, OperandPtr lhs, OperandPtr rhs, OperandPtr dest);
-  */
 
   void MOV(OperandPtr lhs, OperandPtr rhs);
   void ASG(OperandPtr lhs, OperandPtr rhs, OperandPtr dest);
@@ -856,18 +650,6 @@ struct ASMOperand : std::variant<IR::Operand, Reg::GPR>
   using std::variant<IR::Operand, Reg::GPR>::variant;
   friend std::ostream& operator<<(std::ostream& os, ASMOperand& asm_oper)
   {
-    /*
-    std::visit(
-      [&os](auto&& arg)
-      {
-        using T = std::decay_t<decltype(arg)>;
-        if constexpr (std::is_same_v<T, IR::Operand>)
-          os << CodeGen::format_operand(arg);
-        else
-          os << arg;
-      }, asm_oper
-    );
-    */
     return os;
   }
 };
