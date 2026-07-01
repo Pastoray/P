@@ -72,7 +72,7 @@ namespace Node
   struct Lit;
   struct Ident;
   struct Int;
-  struct Float;
+  struct Double;
   struct String;
   struct Char;
   struct Call;
@@ -85,7 +85,7 @@ namespace Node
     virtual void visit(const Ident& ident) = 0;
     virtual void visit(const Path& path) = 0;
     virtual void visit(const Int& int_) = 0;
-    virtual void visit(const Float& float_) = 0;
+    virtual void visit(const Double& double_) = 0;
     virtual void visit(const String& string) = 0;
     virtual void visit(const Char& char_) = 0;
     virtual void visit(const Call& call) = 0;
@@ -148,19 +148,19 @@ namespace Node
     int val;
   };
 
-  struct Float : Lit
+  struct Double : Lit
   {
-    explicit Float(const float val) : val(val) {}
+    explicit Double(const double val) : val(val) {}
     void accept(ExprVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override
     {
       auto old_prec = std::cout.precision();
-      std::cout << std::string(ident, '\t') << "Node::Float {\n";
-      std::cout << std::string(ident + 1, '\t') << "val: " << std::setprecision(9) << val << '\n';
+      std::cout << std::string(ident, '\t') << "Node::Double {\n";
+      std::cout << std::string(ident + 1, '\t') << "val: " << std::setprecision(20) << val << '\n';
       std::cout << std::string(ident, '\t') << "}\n";
       std::cout.precision(old_prec);
     }
-    float val;
+    double val;
   };
   
   struct String : Lit
@@ -741,7 +741,7 @@ public:
   std::optional<Node::Namespace> parse_namespace();
 
   std::optional<Node::Int> parse_lit_int();
-  std::optional<Node::Float> parse_lit_float();
+  std::optional<Node::Double> parse_lit_double();
   std::optional<Node::String> parse_lit_string();
   std::optional<Node::Char> parse_lit_char();
   std::optional<Node::Path> parse_lit_path();

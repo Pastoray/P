@@ -41,7 +41,7 @@
 
 #define LITERAL_LIST \
   OP(INT, "int") \
-  OP(FLOAT, "float") \
+  OP(DOUBLE, "double") \
   OP(STRING, "string") \
   OP(CHAR, "char") \
   OP(IDENT, "ident")

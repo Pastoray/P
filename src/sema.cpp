@@ -316,7 +316,7 @@ Sema::ExprInfo Sema::analyze_int(const Node::Int& int_)
   return ExprInfo(Type(Type::Base::I32), ValCat::RVALUE);
 }
 
-Sema::ExprInfo Sema::analyze_float(const Node::Float& float_)
+Sema::ExprInfo Sema::analyze_double(const Node::Double& double_)
 {
   return ExprInfo(Type(Type::Base::F64), ValCat::RVALUE);
 }
@@ -335,8 +335,8 @@ Sema::ExprInfo Sema::analyze_lit(const std::shared_ptr<Node::Lit>& lit)
 {
   if (auto int_ = std::dynamic_pointer_cast<Node::Int>(lit))
     return analyze_int(*int_);
-  if (auto float_ = std::dynamic_pointer_cast<Node::Float>(lit))
-    return analyze_float(*float_);
+  if (auto double_ = std::dynamic_pointer_cast<Node::Double>(lit))
+    return analyze_double(*double_);
   if (auto string = std::dynamic_pointer_cast<Node::String>(lit))
     return analyze_string(*string);
   if (auto c = std::dynamic_pointer_cast<Node::Char>(lit))

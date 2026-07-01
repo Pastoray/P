@@ -29,7 +29,7 @@ std::vector<Token> Tokenizer::tokenize()
           consume();
         }
 
-        tokens.emplace_back(TokenTypes::Literal::FLOAT, buffer);
+        tokens.emplace_back(TokenTypes::Literal::DOUBLE, buffer);
       }
       else tokens.emplace_back(TokenTypes::Literal::INT, buffer);
       buffer.clear();

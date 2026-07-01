@@ -372,10 +372,10 @@ std::optional<Node::Int> Parser::parse_lit_int()
   return {};
 }
 
-std::optional<Node::Float> Parser::parse_lit_float()
+std::optional<Node::Double> Parser::parse_lit_double()
 {
-  if (peek() && *peek() == TokenTypes::Literal::FLOAT)
-    return Node::Float(std::stof(consume().value.value()));
+  if (peek() && *peek() == TokenTypes::Literal::DOUBLE)
+    return Node::Double(std::stod(consume().value.value()));
   return {};
 }
 
@@ -397,8 +397,8 @@ std::optional<std::shared_ptr<Node::Lit>> Parser::parse_lit()
 {
   if (auto int_ = parse_lit_int())
     return std::make_shared<Node::Int>(*int_);
-  if (auto float_ = parse_lit_float())
-    return std::make_shared<Node::Float>(*float_);
+  if (auto double_ = parse_lit_double())
+    return std::make_shared<Node::Double>(*double_);
   if (auto string = parse_lit_string())
     return std::make_shared<Node::String>(*string);
   if (auto c = parse_lit_char())

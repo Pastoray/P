@@ -37,7 +37,7 @@ void IRGen::Visitor::visit(const Node::Path& path) { m_gen.gen_path(path); }
 
 void IRGen::Visitor::visit(const Node::Int& int_) { m_gen.gen_int(int_); }
 
-void IRGen::Visitor::visit(const Node::Float& float_) { m_gen.gen_float(float_); };
+void IRGen::Visitor::visit(const Node::Double& double_) { m_gen.gen_double(double_); };
 
 void IRGen::Visitor::visit(const Node::String& string) { m_gen.gen_string(string); };
 
@@ -763,10 +763,10 @@ void IRGen::gen_int(const Node::Int& int_)
   m_stack.emplace(IR::Lit(int_.val, Type(Type::Base::I32)));
 }
 
-void IRGen::gen_float(const Node::Float& float_)
+void IRGen::gen_double(const Node::Double& double_)
 {
   IR::Label l = IR::Label::create_rodata(Type(Type::Base::F64));
-  auto lit = IR::Lit(float_.val, Type(Type::Base::F64));
+  auto lit = IR::Lit(double_.val, Type(Type::Base::F64));
   m_instructs->emplace_back(IR::GStore(l, lit));
   m_stack.emplace(l);
 }

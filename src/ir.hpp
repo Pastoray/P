@@ -36,7 +36,7 @@ namespace IR
       std::visit([&os](const auto& val)
         {
           auto old_prec = os.precision();
-          os << std::setprecision(9) << val;
+          os << std::setprecision(20) << val;
           os.precision(old_prec);
         }, lit.value
       );
@@ -534,7 +534,7 @@ class IRGen
     void visit(const Node::Ident&) override;
     void visit(const Node::Path&) override;
     void visit(const Node::Int&) override;
-    void visit(const Node::Float&) override;
+    void visit(const Node::Double&) override;
     void visit(const Node::String&) override;
     void visit(const Node::Char&) override;
     void visit(const Node::Call&) override;
@@ -566,7 +566,7 @@ private:
   void gen_ident(const Node::Ident&);
   void gen_path(const Node::Path&);
   void gen_int(const Node::Int&);
-  void gen_float(const Node::Float&);
+  void gen_double(const Node::Double&);
   void gen_string(const Node::String&);
   void gen_char(const Node::Char&);
   // void gen_member(const Node::Member& mem);
