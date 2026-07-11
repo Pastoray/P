@@ -35,6 +35,8 @@ void IRGen::Visitor::visit(const Node::Path& path) { m_gen.gen_path(path); }
 
 void IRGen::Visitor::visit(const Node::Int& int_) { m_gen.gen_int(int_); }
 
+void IRGen::Visitor::visit(const Node::Bool& bool_) { m_gen.gen_bool(bool_); }
+
 void IRGen::Visitor::visit(const Node::Double& double_) { m_gen.gen_double(double_); };
 
 void IRGen::Visitor::visit(const Node::String& string) { m_gen.gen_string(string); };
@@ -60,6 +62,8 @@ void IRGen::Visitor::visit(const Node::Ret& ret_) { m_gen.gen_ret(ret_); }
 void IRGen::Visitor::visit(const Node::Call& call) { m_gen.gen_call(call); }
 
 void IRGen::Visitor::visit(const Node::ExprStmt& expr_stmt) { m_gen.gen_expr_stmt(expr_stmt); }
+
+void IRGen::Visitor::visit(const Node::Scope& scp) { m_gen.gen_scope(scp); }
 
 void IRGen::match_types()
 {
@@ -649,6 +653,11 @@ void IRGen::gen_int(const Node::Int& int_)
   m_stack.emplace(IR::Lit(int_.val, Type(Type::Base::I32)));
 }
 
+void IRGen::gen_bool(const Node::Bool& bool_)
+{
+  m_stack.emplace(IR::Lit(bool_.val, Type(Type::Base::I32)));
+}
+
 void IRGen::gen_double(const Node::Double& double_)
 {
   IR::Label l = IR::Label::create_rodata(Type(Type::Base::F64));
@@ -687,19 +696,22 @@ void IRGen::gen_asgn(const Node::Asgn& asgn)
   {
     auto dest = IR::Reg(*Node::get_res_t(asgn.type));
     auto sym = m_anl.sym_table.at(asgn.id.id);
-    auto alloca = IR::Alloca(dest, {});
+    std::vector<IR::Operand> dims;
     
     auto cur_t = arr;
-    while (cur_t)
+    while (true)
     {
       auto d = std::static_pointer_cast<Node::Expr>(cur_t->size);
       d->accept(m_visitor);
       auto top = m_stack.top();
-      alloca.dims.push_back(top);
+      dims.push_back(top);
       m_stack.pop();
-      cur_t = std::get_if<Type::Arr>(&cur_t->of->type);
+      if (auto inner = std::get_if<Type::Arr>(&cur_t->of->type))
+        cur_t = inner;
+      else break;
     }
 
+    auto alloca = IR::Alloca(dest, dims, cur_t->of->size());
     std::reverse(alloca.dims.begin(), alloca.dims.end());
     r_to_arr_dims.try_emplace(dest, alloca.dims);
     aid_to_r.try_emplace(sym.id, dest);

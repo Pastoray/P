@@ -478,7 +478,7 @@ void CodeGen::gen_alloca(IR::Alloca& alc)
   {
     auto tmp = pool.alloc_any_gpr(8);
     auto poper = PreOper(Type(Type::Base::I64), tmp, false, 0, false, &pool);
-    auto val = IR::Operand(IR::Lit(4, Type(Type::Base::I64)));
+    auto val = IR::Operand(IR::Lit(static_cast<int32_t>(alc.base_t_size), Type(Type::Base::I64)));
     MOV(&val, &poper);
     auto dtmp = pool.alloc_any_gpr(8);
 
@@ -1328,7 +1328,9 @@ void CodeGen::gen_call(IR::Call& call)
     }
   }
 
-  m_text << "call " << format_operand(call.callable) << "\n\t";
+  auto cb = prepare_oper(&call.callable);
+
+  m_text << "call " << "*" <<  cb << "\n\t";
   m_text << "movq -1024(%rbp), %rsp\n\t";
 
   for (auto& regs : assigned_regs)

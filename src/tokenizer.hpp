@@ -1,7 +1,8 @@
 #ifndef TOKENIZER_H
 #define TOKENIZER_H
 
-#include <cstdint>
+#include "diagnostic.hpp"
+#include "utils.hpp"
 #include <optional>
 #include <string>
 #include <variant>
@@ -41,6 +42,7 @@
 
 #define LITERAL_LIST \
   OP(INT, "int") \
+  OP(BOOL, "bool") \
   OP(DOUBLE, "double") \
   OP(STRING, "string") \
   OP(CHAR, "char") \
@@ -92,8 +94,8 @@ using TokenType = std::variant<TokenTypes::Symbol, TokenTypes::Keyword, TokenTyp
 
 struct Token
 {
-  explicit Token(const TokenType t) : type(t) {}
-  Token(const TokenType t, const std::string& s) : type(t), value(s) {}
+  explicit Token(const TokenType t, SrcLoc loc) : type(t), loc(std::move(loc)) {}
+  Token(const TokenType t, const std::string& s, SrcLoc loc) : type(t), value(s), loc(std::move(loc)) {}
 
   template <typename T>
   bool operator==(const T val) const
@@ -108,41 +110,41 @@ struct Token
 
   static std::string to_string(const Token& tok)
   {
-    struct Visitor
-    {
-      std::string operator()(const TokenTypes::Symbol& arg)
+    return std::visit(
+      Utils::overloaded
       {
-        switch (arg)
+        [&](const TokenTypes::Symbol& arg)
         {
-          #define OP(name, str) case TokenTypes::Symbol::name: return str;
-          SYMBOL_LIST
-          #undef OP
-          default: return "unknown symbol";
-        }
-      }
-      std::string operator()(const TokenTypes::Literal& arg)
-      {
-        switch (arg)
+          switch (arg)
+          {
+            #define OP(name, str) case TokenTypes::Symbol::name: return str;
+            SYMBOL_LIST
+            #undef OP
+            default: return "Unknown symbol";
+          }
+        },
+        [&](const TokenTypes::Literal& arg)
         {
-          #define OP(name, str) case TokenTypes::Literal::name: return str;
-          LITERAL_LIST
-          #undef OP
-          default: return "unknown literal";
-        }
-      }
-
-      std::string operator()(const TokenTypes::Keyword& arg)
-      {
-        switch (arg)
+          switch (arg)
+          {
+            #define OP(name, str) case TokenTypes::Literal::name: return str;
+            LITERAL_LIST
+            #undef OP
+            default: return "Unknown literal";
+          }
+        },
+        [&](const TokenTypes::Keyword& arg)
         {
-          #define OP(name, str) case TokenTypes::Keyword::name: return str;
-          KEYWORD_LIST
-          #undef OP
-          default: return "unknown keyword";
+          switch (arg)
+          {
+            #define OP(name, str) case TokenTypes::Keyword::name: return str;
+            KEYWORD_LIST
+            #undef OP
+            default: return "Unknown keyword";
+          }
         }
-      }
-    };
-    return std::visit(Visitor{}, tok.type);
+      }, tok.type
+    );
   }
   std::ostream& operator<<(std::ostream& os) const
   {
@@ -158,6 +160,7 @@ struct Token
 
   TokenType type;
   std::optional<std::string> value;
+  SrcLoc loc;
 
   template <typename T>
   bool operator==(const T& type_enum)
@@ -171,6 +174,16 @@ struct Token
   {
     os << to_string(token);
     return os;
+  }
+};
+
+template <>
+struct fmt::formatter<Token> : fmt::formatter<string_view>
+{
+  auto format(const Token& tok, format_context& ctx) const -> format_context::iterator
+  {
+    std::string text = Token::to_string(tok);
+    return fmt::formatter<string_view>::format(text, ctx);
   }
 };
 
@@ -202,10 +215,11 @@ public:
 private:
   [[nodiscard]] std::optional<char> peek(int offset = 0) const;
   char consume(unsigned int amount = 1);
+  void sanitize_src();
 
 private:
-  const std::string m_src;
-  uint16_t m_index;
+  std::string m_src;
+  size_t m_index;
 };
 
 #endif // TOKENIZER_H

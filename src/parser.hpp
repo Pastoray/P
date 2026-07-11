@@ -61,7 +61,8 @@ namespace Node
   struct ExprVisitor;
   struct Expr
   {
-    Expr() = default;
+    SrcLoc loc;
+    explicit Expr(SrcLoc loc) : loc(std::move(loc)) {}
     virtual ~Expr() = default;
     virtual void accept(ExprVisitor& v) = 0;
     virtual void dump(int ident) const = 0;
@@ -76,6 +77,7 @@ namespace Node
   struct Char;
   struct Call;
   struct Path;
+  struct Bool;
   struct ExprVisitor
   {
     virtual ~ExprVisitor() = default;
@@ -84,6 +86,7 @@ namespace Node
     virtual void visit(const Ident& ident) = 0;
     virtual void visit(const Path& path) = 0;
     virtual void visit(const Int& int_) = 0;
+    virtual void visit(const Bool& bool_) = 0;
     virtual void visit(const Double& double_) = 0;
     virtual void visit(const String& string) = 0;
     virtual void visit(const Char& char_) = 0;
@@ -91,7 +94,9 @@ namespace Node
   };
   struct Lit : Expr
   {
+    explicit Lit(SrcLoc loc) : Expr(std::move(loc)) {}
   };
+
   struct Asgn;
   struct ReAsgn;
   struct If;
@@ -102,6 +107,7 @@ namespace Node
   struct ExprStmt;
   struct TypeRef;
   struct TypeDef;
+  struct Scope;
   struct StmtVisitor
   {
     virtual ~StmtVisitor() = default;
@@ -110,6 +116,7 @@ namespace Node
     virtual void visit(const Asgn& asgn) = 0;
     virtual void visit(const If& if_) = 0;
     virtual void visit(const For& for_) = 0;
+    virtual void visit(const Scope& scp) = 0;
     virtual void visit(const Continue& cnt) = 0;
     virtual void visit(const Break& brk) = 0;
     virtual void visit(const Ret& ret) = 0;
@@ -117,7 +124,8 @@ namespace Node
   };
   struct Stmt
   {
-    Stmt() = default;
+    SrcLoc loc;
+    explicit Stmt(SrcLoc loc) : loc(std::move(loc)) {}
     virtual ~Stmt() = default;
     virtual void accept(StmtVisitor& v) = 0;
     virtual void dump(int ident) const = 0;
@@ -125,7 +133,8 @@ namespace Node
   struct DeclVisitor;
   struct Decl
   {
-    Decl() = default;
+    SrcLoc loc;
+    explicit Decl(SrcLoc loc) : loc(std::move(loc)) {}
     virtual ~Decl() = default;
     virtual void accept(DeclVisitor& v) = 0;
     virtual void dump(int ident) const = 0;
@@ -136,7 +145,7 @@ namespace Node
 
   struct Int : Lit
   {
-    explicit Int(const int val) : val(val) {}
+    explicit Int(const int val, SrcLoc loc) : val(val), Lit(std::move(loc)) {}
     void accept(ExprVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override
     {
@@ -149,7 +158,7 @@ namespace Node
 
   struct Double : Lit
   {
-    explicit Double(const double val) : val(val) {}
+    explicit Double(const double val, SrcLoc loc) : val(val), Lit(std::move(loc)) {}
     void accept(ExprVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override
     {
@@ -164,7 +173,7 @@ namespace Node
   
   struct String : Lit
   {
-    explicit String(std::string val) : val(std::move(val)) {}
+    explicit String(std::string val, SrcLoc loc) : val(std::move(val)), Lit(std::move(loc)) {}
     void accept(ExprVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override
     {
@@ -177,7 +186,7 @@ namespace Node
 
   struct Char : Lit
   {
-    explicit Char(std::string val) : val(std::move(val)) {}
+    explicit Char(std::string val, SrcLoc loc) : val(std::move(val)), Lit(std::move(loc)) {}
     void accept(ExprVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override
     {
@@ -194,15 +203,15 @@ namespace Node
     uint32_t id;
     std::string name;
 
-    explicit Ident(std::string name) : id(nid++), name(std::move(name)) {}
-    Ident(const Ident& other) : id(nid++), name(other.name) {}
+    explicit Ident(std::string name, SrcLoc loc) : id(nid++), name(std::move(name)), Lit(std::move(loc)) {}
+    Ident(const Ident& other) : id(nid++), name(other.name), Lit(other.loc) {}
     Ident& operator=(const Ident& other)
     {
       if (this != &other) { name = other.name; }
       return *this;
     }
 
-    Ident(Ident&& other) noexcept : id(other.id), name(std::move(other.name)) {}
+    Ident(Ident&& other) noexcept : id(other.id), name(std::move(other.name)), Lit(std::move(other.loc)) {}
 
     bool operator==(const Ident& other) const { return id == other.id; }
     
@@ -216,9 +225,22 @@ namespace Node
     }
   };
 
+  struct Bool : Lit
+  {
+    explicit Bool(const bool val, SrcLoc loc) : val(val), Lit(std::move(loc)) {}
+    void accept(ExprVisitor& v) override { v.visit(*this); }
+    void dump(int ident) const override
+    {
+      std::cout << std::string(ident, '\t') << "Node::Bool {\n";
+      std::cout << std::string(ident + 1, '\t') << "val: " << val << '\n';
+      std::cout << std::string(ident, '\t') << "}\n";
+    }
+    bool val;
+  };
+
   struct Path : Lit
   {
-    explicit Path(std::vector<Ident> p) : path(std::move(p)) {}
+    explicit Path(std::vector<Ident> p) : path(std::move(p)), Lit(p.front()) {}
     void accept(ExprVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override
     {
@@ -234,7 +256,8 @@ namespace Node
 
   struct UnExpr : Expr
   {
-    explicit UnExpr(std::shared_ptr<Expr> expr, UnOp op, bool pref) : expr(std::move(expr)), op(op), pref(pref) {};
+    explicit UnExpr(std::shared_ptr<Expr> expr, UnOp op, bool pref, SrcLoc loc)
+      : expr(std::move(expr)), op(op), pref(pref), Expr(std::move(loc)) {};
     void accept(ExprVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override
     {
@@ -255,11 +278,9 @@ namespace Node
 
   struct BinExpr : Expr
   {
-    explicit BinExpr(std::shared_ptr<Expr> lhs, BinOp op,
-                     std::shared_ptr<Expr> rhs)
-        : lhs(std::move(lhs)), op(op), rhs(std::move(rhs))
-    {
-    }
+    explicit BinExpr(std::shared_ptr<Expr> lhs, BinOp op, std::shared_ptr<Expr> rhs, SrcLoc loc)
+      : lhs(std::move(lhs)), op(op), rhs(std::move(rhs)), Expr(std::move(loc))
+    {}
 
     void accept(ExprVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override
@@ -285,9 +306,9 @@ namespace Node
 
   struct Call : Expr
   {
-    explicit Call(std::shared_ptr<Expr> callable) : callable(std::move(callable)) {}
-    explicit Call(std::shared_ptr<Expr> callable, std::vector<std::shared_ptr<Expr>> args)
-      : callable(std::move(callable)), args(std::move(args)) {}
+    explicit Call(std::shared_ptr<Expr> callable, SrcLoc loc) : callable(std::move(callable)), Expr(std::move(loc)) {}
+    explicit Call(std::shared_ptr<Expr> callable, std::vector<std::shared_ptr<Expr>> args, SrcLoc loc)
+      : callable(std::move(callable)), args(std::move(args)), Expr(std::move(loc)) {}
 
     void accept(ExprVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override
@@ -302,13 +323,33 @@ namespace Node
     std::vector<std::shared_ptr<Expr>> args;
   };
 
-  struct Scope
+  struct Scope : Stmt
   {
+    explicit Scope(SrcLoc loc) : Stmt(std::move(loc)) {}
     std::vector<std::variant<
       std::shared_ptr<Expr>,
       std::shared_ptr<Stmt>,
       std::shared_ptr<Decl>
     >> terms;
+
+    void accept(StmtVisitor& v) override { v.visit(*this); }
+    void dump(int ident) const override
+    {
+      std::cout << "{" << std::endl;
+      for (auto& t : terms)
+        std::visit(
+          [&](auto&& arg)
+          {
+            arg->dump(ident + 1);
+            /*
+            [&](const std::shared_ptr<Expr>& expr) { expr->dump(ident + 1); },
+            [&](const std::shared_ptr<Stmt>& stmt) { stmt->dump(ident + 1); },
+            [&](const std::shared_ptr<Decl>& decl) { decl->dump(ident + 1); },
+            */
+          }, t
+        );
+      std::cout << "}" << std::endl;
+    }
 
     void push_back(std::shared_ptr<Stmt> stmt)
     {
@@ -328,8 +369,8 @@ namespace Node
 
   struct TypeRef : Stmt
   {
-    explicit TypeRef() : res_t(nullptr) {}
-    explicit TypeRef(std::shared_ptr<Type> type) : res_t(std::move(type)) {}
+    explicit TypeRef(SrcLoc loc) : res_t(nullptr), Stmt(std::move(loc)) {}
+    explicit TypeRef(std::shared_ptr<Type> type, SrcLoc loc) : res_t(std::move(type)), Stmt(std::move(loc)) {}
     std::shared_ptr<Type> res_t;
 
     void accept(StmtVisitor& v) override { v.visit(*this); }
@@ -346,8 +387,8 @@ namespace Node
         std::shared_ptr<Struct>,
         std::shared_ptr<Union>,
         std::shared_ptr<Enum>
-      > type, std::shared_ptr<Type> res_t
-    ) : type(std::move(type)), res_t(std::move(res_t)) {}
+      > type, std::shared_ptr<Type> res_t, SrcLoc loc
+    ) : type(std::move(type)), res_t(std::move(res_t)), Stmt(std::move(loc)) {}
 
     std::variant<
       std::shared_ptr<Struct>,
@@ -388,13 +429,15 @@ namespace Node
 
   struct Param : Ident
   {
-    explicit Param(TypeRef type, std::string id) : Ident(std::move(id)), type(std::move(type)) {}
+    explicit Param(TypeRef type, std::string id, SrcLoc loc)
+      : Ident(std::move(id), std::move(loc)), type(std::move(type)) {}
     TypeRef type;
   };
 
   struct Func : Decl, Callable
   {
-    explicit Func(Ident&& id, TypeRef rtype) : id(std::move(id)), ret_type(std::move(rtype)) {}
+    explicit Func(Ident&& id, TypeRef rtype, SrcLoc loc)
+      : id(std::move(id)), ret_type(std::move(rtype)), Decl(std::move(loc)) {}
     void accept(DeclVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override
     {
@@ -411,13 +454,8 @@ namespace Node
       std::cout << std::string(ident + 1, '\t') << "return: " << *ret_type.res_t << "\n";
 
       if (scope.has_value()) {
-        std::cout << std::string(ident + 1, '\t') << "body: {\n";
-        for (const auto& term : scope->terms) {
-          std::visit([ident](auto&& arg) {
-            if (arg) arg->dump(ident + 2);
-          }, term);
-        }
-        std::cout << std::string(ident + 1, '\t') << "}\n";
+        std::cout << std::string(ident + 1, '\t') << "scope: {\n";
+        scope->dump(ident);
       } else {
         std::cout << std::string(ident + 1, '\t') << "body: <forward_declaration>\n";
       }
@@ -433,7 +471,7 @@ namespace Node
 
   struct Struct : Decl
   {
-    explicit Struct(Ident id) : id(std::move(id)) {}
+    explicit Struct(Ident id, SrcLoc loc) : id(std::move(id)), Decl(std::move(loc)) {}
     void accept(DeclVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override {
       std::cout << std::string(ident, '\t') << "Node::Struct: " << id.name << " {\n";
@@ -446,7 +484,7 @@ namespace Node
 
   struct Union : Decl
   {
-    explicit Union(Ident id) : id(std::move(id)) {}
+    explicit Union(Ident id, SrcLoc loc) : id(std::move(id)), Decl(std::move(loc)) {}
     void accept(DeclVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override {
       std::cout << std::string(ident, '\t') << "Node::Union: " << id.name << " {\n";
@@ -459,12 +497,14 @@ namespace Node
 
   struct Namespace : Decl
   {
-    explicit Namespace(Ident id) : id(std::move(id)) {}
+    explicit Namespace(Ident id, const SrcLoc& loc) : id(std::move(id)), Decl(loc), scp(loc) {}
     void accept(DeclVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override
     {
       std::cout << std::string(ident, '\t') << "Node::Namespace: " << id.name << " {\n";
       std::cout << std::string(ident + 1, '\t') << "scp: \n";
+      scp.dump(ident);
+      /*
       for (auto& term : scp.terms)
         std::visit(
           Utils::overloaded
@@ -475,6 +515,7 @@ namespace Node
           }, term
         );
       std::cout << std::string(ident, '\t') << "}\n";
+      */
     }
     Ident id;
     Scope scp;
@@ -485,17 +526,17 @@ namespace Node
     Ident id;
     std::variant<TypeDef, TypeRef> type;
     std::optional<std::variant<std::shared_ptr<Expr>, std::shared_ptr<Decl>>> val;
-    Asgn(std::variant<TypeDef, TypeRef> type, std::string id) : type(std::move(type)), id(std::move(id)), val() {}
-    Asgn(std::variant<TypeDef, TypeRef> type, std::string id, std::shared_ptr<Expr> expr)
-        : type(std::move(type)), id(std::move(id)), val(expr)
-    {}
+    explicit Asgn(std::variant<TypeDef, TypeRef> type, std::string id, const SrcLoc& loc)
+      : type(std::move(type)), id(std::move(id), loc), val(), Stmt(loc) {}
+    explicit Asgn(std::variant<TypeDef, TypeRef> type, std::string id, std::shared_ptr<Expr> expr, const SrcLoc& loc)
+      : type(std::move(type)), id(std::move(id), loc), val(expr), Stmt(loc) {}
     void accept(StmtVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override;
   };
 
   struct Enum : Decl
   {
-    explicit Enum(std::string id) : id(std::move(id)) {}
+    explicit Enum(std::string id, const SrcLoc& loc) : id(std::move(id), loc), Decl(loc) {}
     void accept(DeclVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override {
       std::cout << std::string(ident, '\t') << "Node::Enum: " << id.name << " {\n";
@@ -551,6 +592,7 @@ namespace Node
 
   struct Import : Stmt
   {
+    explicit Import(SrcLoc loc) : Stmt(std::move(loc)) {}
     void accept(StmtVisitor& v) override {};
     void dump(int ident) const override
     {
@@ -563,12 +605,9 @@ namespace Node
 
   struct If : Stmt
   {
-    If(std::shared_ptr<Expr> cond, Scope& scope, std::optional<If> if_)
-        : cond(std::move(cond)),
-          scope(std::make_shared<Scope>(std::move(scope))),
-          elif (std::make_shared<std::optional<If>>(std::move(if_)))
-    {
-    }
+    If(std::shared_ptr<Expr> cond, Scope& scope, std::optional<If> if_, SrcLoc loc)
+      : cond(std::move(cond)), scope(std::make_shared<Scope>(std::move(scope))),
+        elif (std::make_shared<std::optional<If>>(std::move(if_))), Stmt(std::move(loc)) {}
 
     void accept(StmtVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override
@@ -583,11 +622,14 @@ namespace Node
 
       if (scope)
       {
-        std::cout << std::string(ident + 1, '\t') << "body (" << scope->terms.size() << " terms): {\n";
+        std::cout << std::string(ident + 1, '\t') << "body (" << scope->terms.size() << " terms): \n";
+        scope->dump(ident);
+        /*
         for (const auto& term : scope->terms)
           std::visit([ident](auto&& arg) { if (arg) arg->dump(ident + 2); }, term);
 
         std::cout << std::string(ident + 1, '\t') << "}\n";
+        */
       }
 
       if (elif && *elif)
@@ -607,6 +649,7 @@ namespace Node
 
   struct For : Stmt
   {
+    explicit For(SrcLoc loc) : Stmt(std::move(loc)) {}
     void accept(StmtVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override
     {
@@ -626,19 +669,21 @@ namespace Node
 
   struct Continue : Stmt
   {
+    explicit Continue(SrcLoc loc) : Stmt(std::move(loc)) {}
     void accept(StmtVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override { std::cout << std::string(ident, '\t') << "continue\n"; }
   };
 
   struct Break : Stmt
   {
+    explicit Break(SrcLoc loc) : Stmt(std::move(loc)) {}
     void accept(StmtVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override { std::cout << std::string(ident, '\t') << "break\n"; }
   };
 
   struct ExprStmt : Stmt
   {
-    explicit ExprStmt(std::shared_ptr<Expr> expr) : expr(std::move(expr)) {}
+    explicit ExprStmt(std::shared_ptr<Expr> expr) : expr(std::move(expr)), Stmt(expr->loc) {}
     void accept(StmtVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override
     {
@@ -652,10 +697,8 @@ namespace Node
 
   struct Ret : Stmt
   {
-    explicit Ret(std::optional<std::shared_ptr<Expr>> expr)
-        : ret_val(std::move(expr))
-    {
-    }
+    explicit Ret(std::optional<std::shared_ptr<Expr>> expr, SrcLoc loc) : ret_val(std::move(expr)), Stmt(std::move(loc)) {}
+
     void accept(StmtVisitor& v) override { v.visit(*this); }
     void dump(int ident) const override
     {
@@ -665,6 +708,39 @@ namespace Node
       std::cout << std::string(ident, '\t') << "}\n";
     }
     std::optional<std::shared_ptr<Expr>> ret_val;
+  };
+
+  struct ErrStmt : Stmt
+  {
+    explicit ErrStmt(SrcLoc loc) : Stmt(std::move(loc)) {}
+    void accept(StmtVisitor& v) override {}
+    void dump(int ident) const override
+    {
+      std::cout << "Statement error: \n";
+      std::cout << loc << std::endl;
+    }
+  };
+
+  struct ErrExpr : Expr
+  {
+    explicit ErrExpr(SrcLoc loc) : Expr(std::move(loc)) {}
+    void accept(ExprVisitor& v) override {}
+    void dump(int ident) const override
+    {
+      std::cout << "Expression error: \n";
+      std::cout << loc << std::endl;
+    }
+  };
+
+  struct ErrDecl : Decl
+  {
+    explicit ErrDecl(SrcLoc loc) : Decl(std::move(loc)) {}
+    void accept(DeclVisitor& v) override {}
+    void dump(int ident) const override
+    {
+      std::cout << "Declaration error: \n";
+      std::cout << loc << std::endl;
+    }
   };
 
   using Node = std::variant<std::shared_ptr<Stmt>, std::shared_ptr<Expr>, std::shared_ptr<Decl>>;
@@ -717,6 +793,7 @@ public:
   std::optional<Node::Namespace> parse_namespace();
 
   std::optional<Node::Int> parse_lit_int();
+  std::optional<Node::Bool> parse_lit_bool();
   std::optional<Node::Double> parse_lit_double();
   std::optional<Node::String> parse_lit_string();
   std::optional<Node::Char> parse_lit_char();
@@ -737,13 +814,13 @@ public:
   std::optional<Node::TypeRef> parse_type_ref();
   std::optional<Node::TypeDef> parse_type_def();
   std::optional<std::variant<Node::TypeDef, Node::TypeRef>> parse_type();
-  void parse_arr(std::variant<Node::TypeDef, Node::TypeRef>& type);
-  void parse_arr(std::shared_ptr<Type>&);
   std::optional<Node::Import> parse_import();
+  void parse_arr(std::variant<Node::TypeDef, Node::TypeRef>&);
 
 private:
   [[nodiscard]] std::optional<Token> peek(int offset = 0);
   Token consume();
+  void sync();
 
   template <typename T, typename = void>
   struct has_value_type : std::false_type

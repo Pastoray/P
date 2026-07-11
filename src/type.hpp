@@ -29,6 +29,7 @@ struct Type
     F64,
     CHAR,
     VOID,
+    ERROR
   };
 
   enum class TypeState
@@ -232,6 +233,7 @@ struct Type
           switch (bt)
           {
             case Base::VOID:
+            case Base::ERROR:
               return 0;
 
             case Base::I8:
@@ -403,19 +405,20 @@ struct Type
   {
     switch (type)
     {
-      case Base::I8:   return "I8";
-      case Base::I16:  return "I16";
-      case Base::I32:  return "I32";
-      case Base::I64:  return "I64";
-      case Base::U8:   return "U8";
-      case Base::U16:  return "U16";
-      case Base::U32:  return "U32";
-      case Base::U64:  return "U64";
-      case Base::F32:  return "F32";
-      case Base::F64:  return "F64";
-      case Base::CHAR: return "CHAR";
-      case Base::VOID: return "VOID";
-      default: return "UNKNOWN";
+      case Base::I8:    return "I8";
+      case Base::I16:   return "I16";
+      case Base::I32:   return "I32";
+      case Base::I64:   return "I64";
+      case Base::U8:    return "U8";
+      case Base::U16:   return "U16";
+      case Base::U32:   return "U32";
+      case Base::U64:   return "U64";
+      case Base::F32:   return "F32";
+      case Base::F64:   return "F64";
+      case Base::CHAR:  return "CHAR";
+      case Base::VOID:  return "VOID";
+      case Base::ERROR: return "ERROR";
+      default:          return "UNKNOWN";
     }
   }
 
@@ -505,7 +508,7 @@ struct Type
     return std::visit(
       Utils::overloaded
       {
-        [](const Type::Base& b) { return b != Type::Base::VOID; },
+        [](const Type::Base& b) { return b != Type::Base::VOID && b != Type::Base::ERROR; },
         [](const Type::Ptr& p) { return true; },
         [](const Type::Arr& a) { return true; },
         [](const Type::Struct& s) { return s.state == TypeState::RESOLVED; },

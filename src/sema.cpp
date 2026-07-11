@@ -1,4 +1,5 @@
 #include "sema.hpp"
+#include "diagnostic.hpp"
 #include "parser.hpp"
 #include "type.hpp"
 #include "utils.hpp"
@@ -34,7 +35,7 @@ Sema::Analysis Sema::analyze()
     else if (auto decl = std::get_if<std::shared_ptr<Node::Decl>>(&node))
       analyze_decl(*decl);
     else
-      assert(false);
+      Diagnostic::error(SrcLoc({}, 0, 0, {}), "unknown node type");
   }
   return g_anl;
 }
@@ -58,7 +59,7 @@ void Sema::analyze_stmt(const std::shared_ptr<Node::Stmt>& stmt)
   else if (auto brk = std::dynamic_pointer_cast<Node::Break>(stmt))
     return;
   else
-    assert(false);
+    Diagnostic::error(SrcLoc({}, 0, 0, {}), "Unknown statement node");
 }
 
 Sema::ExprInfo Sema::analyze_bin_expr(Node::BinExpr& bin_expr)
@@ -67,50 +68,75 @@ Sema::ExprInfo Sema::analyze_bin_expr(Node::BinExpr& bin_expr)
   if (bin_expr.op == BinOp::DOT)
   {
     auto rhs = std::dynamic_pointer_cast<Node::Ident>(bin_expr.rhs);
-    assert(rhs != nullptr);
+    if (rhs == nullptr)
+    {
+      Diagnostic::error(SrcLoc({}, 0, 0, {}), "'.' operator can only have identifier as rhs");
+      return ExprInfo(Type(Type::Base::ERROR), ValCat::RVALUE);
+    }
 
     if (auto* stc_t = std::get_if<Type::Struct>(&lhs_expri.type.type))
     {
       size_t off = stc_t->body->offsets.at(rhs->name);
-      bin_expr.rhs = std::make_shared<Node::Int>(off);
+      bin_expr.rhs = std::make_shared<Node::Int>(off, SrcLoc({}, 0, 0, {}));
       return ExprInfo(*stc_t->body->types.at(rhs->name), ValCat::LVALUE);
     }
     else if (auto* un_t = std::get_if<Type::Union>(&lhs_expri.type.type))
     {
       size_t off = un_t->body->offsets.at(rhs->name);
-      bin_expr.rhs = std::make_shared<Node::Int>(off);
+      bin_expr.rhs = std::make_shared<Node::Int>(off, SrcLoc({}, 0, 0, {}));
       return ExprInfo(*un_t->body->types.at(rhs->name), ValCat::LVALUE);
     }
     else if (auto* en_t = std::get_if<Type::Enum>(&lhs_expri.type.type))
     {
       auto expr = std::static_pointer_cast<Node::Expr>(en_t->enums.at(rhs->name));
-      auto bexpr = Node::BinExpr(expr, BinOp::ADD, std::make_shared<Node::Int>(0));
+      auto bexpr = Node::BinExpr(
+        expr,
+        BinOp::ADD,
+        std::make_shared<Node::Int>(0, SrcLoc({}, 0, 0, {})),
+        SrcLoc({}, 0, 0, {})
+      );
       bin_expr = bexpr;
       return ExprInfo(Type(Type::Base::I32), ValCat::RVALUE);
     }
-    else assert(false);
+    else
+    {
+      Diagnostic::error(SrcLoc({}, 0, 0, {}), "'.' operator expects struct, union or enum as lhs");
+      return ExprInfo(Type(Type::Base::ERROR), ValCat::RVALUE);
+    }
   }
   else if (bin_expr.op == BinOp::ARROW)
   {
     auto rhs = std::dynamic_pointer_cast<Node::Ident>(bin_expr.rhs);
-    assert(rhs != nullptr);
+    if (!rhs)
+    {
+      Diagnostic::error(SrcLoc({}, 0, 0, {}), "'->' operator expects identifier as rhs");
+      return ExprInfo(Type(Type::Base::ERROR), ValCat::RVALUE);
+    }
 
     auto* ptr_t = std::get_if<Type::Ptr>(&lhs_expri.type.type);
-    assert(ptr_t != nullptr);
+    if (!ptr_t)
+    {
+      Diagnostic::error(SrcLoc({}, 0, 0, {}), "'->' operator expects pointer as lhs");
+      return ExprInfo(Type(Type::Base::ERROR), ValCat::RVALUE);
+    }
 
     if (auto* stc_t = std::get_if<Type::Struct>(&ptr_t->to->type))
     {
       size_t off = stc_t->body->offsets.at(rhs->name);
-      bin_expr.rhs = std::make_shared<Node::Int>(off);
+      bin_expr.rhs = std::make_shared<Node::Int>(off, SrcLoc({}, 0, 0, {}));
       return ExprInfo(*stc_t->body->types.at(rhs->name), ValCat::LVALUE);
     }
     else if (auto* un_t = std::get_if<Type::Union>(&ptr_t->to->type))
     {
       size_t off = un_t->body->offsets.at(rhs->name);
-      bin_expr.rhs = std::make_shared<Node::Int>(off);
+      bin_expr.rhs = std::make_shared<Node::Int>(off, SrcLoc({}, 0, 0, {}));
       return ExprInfo(*un_t->body->types.at(rhs->name), ValCat::LVALUE);
     }
-    else assert(false);
+    else
+    {
+      Diagnostic::error(SrcLoc({}, 0, 0, {}), "'->' operator expects struct, union or enum pointer as lhs");
+      return ExprInfo(Type(Type::Base::ERROR), ValCat::RVALUE);
+    }
   }
   auto rhs_expri = analyze_expr(bin_expr.rhs);
 
@@ -125,7 +151,10 @@ Sema::ExprInfo Sema::analyze_un_expr(const Node::UnExpr& un_expr)
   else if (un_expr.op == UnOp::ADDR_OF)
   {
     if (expri.val_cat == ValCat::RVALUE)
-      Utils::panic("Invalid use of addrof on rvalue");
+    {
+      Diagnostic::error(SrcLoc({}, 0, 0, {}), "Invalid use of addrof on rvalue");
+      return ExprInfo(Type(Type::Base::ERROR), ValCat::RVALUE);
+    }
     else
       return ExprInfo(expri.type, ValCat::RVALUE);
   }
@@ -136,7 +165,11 @@ Sema::ExprInfo Sema::analyze_un_expr(const Node::UnExpr& un_expr)
 Sema::ExprInfo Sema::analyze_call(const Node::Call& call)
 {
   auto info = analyze_expr(call.callable);
-  assert(info.type.is_func_t());
+  if (!info.type.is_func_t())
+  {
+    Diagnostic::error(SrcLoc({}, 0, 0, {}), "'()' operator expects function as lhs");
+    return ExprInfo(Type(Type::Base::ERROR), ValCat::RVALUE);
+  }
 
   for (auto& arg : call.args)
     analyze_expr(arg);
@@ -153,7 +186,11 @@ Sema::ExprInfo Sema::analyze_expr(const std::shared_ptr<Node::Expr>& expr)
     return analyze_lit(lit);
   else if (auto call = std::dynamic_pointer_cast<Node::Call>(expr))
     return analyze_call(*call);
-  Utils::panic("Unexpected analyze expression");
+  else
+  {
+    Diagnostic::error(SrcLoc({}, 0, 0, {}), "Unknown expression node");
+    return ExprInfo(Type(Type::Base::ERROR), ValCat::RVALUE);
+  }
 }
 
 Sema::ExprInfo Sema::analyze_path(const Node::Path& path)
@@ -165,13 +202,18 @@ Sema::ExprInfo Sema::analyze_path(const Node::Path& path)
       it != m_scope_arena[m_scope_stack[i]]->m_sym_table.end() && it->second.is_ns()
     )
     {
-      auto sym = m_scope_arena[m_scope_stack[i]]->m_sym_table.at(path.path[i].name);
+      auto sym = m_scope_arena[m_scope_stack[i]]->m_sym_table.at(path.path[0].name);
       auto ext = std::get<Sema::Symbol::NsExt>(sym.ext);
       scpid = ext.scp_id;
       break;
     }
   
-  assert(scpid != -1);
+  if (scpid == -1)
+  {
+    Diagnostic::error(SrcLoc({}, 0, 0, {}), "Could not resolve name: {}", path.path[0].name);
+    return ExprInfo(Type(Type::Base::ERROR), ValCat::RVALUE);
+  }
+
   for (size_t i = 1; i < path.path.size(); i++)
   {
     if (
@@ -193,9 +235,19 @@ Sema::ExprInfo Sema::analyze_path(const Node::Path& path)
         return ExprInfo(sym.type, ValCat::LVALUE);
       }
     }
-    else assert(false);
+    else
+    {
+      std::string name = path.path[0].name + "::";
+      for (size_t j = 1; j <= i; j++) name += path.path[j].name;
+      Diagnostic::error(SrcLoc({}, 0, 0, {}), "Could not resolve name: {}", name);
+      return ExprInfo(Type(Type::Base::ERROR), ValCat::RVALUE);
+    }
   }
-  assert(false);
+
+  std::string name = path.path[0].name + "::";
+  for (size_t j = 1; j < path.path.size(); j++) name += path.path[j].name;
+  Diagnostic::error(SrcLoc({}, 0, 0, {}), "Could not resolve name: {}", name);
+  return ExprInfo(Type(Type::Base::ERROR), ValCat::RVALUE);
 }
 
 Sema::ExprInfo Sema::analyze_ident(const Node::Ident& ident)
@@ -207,10 +259,16 @@ Sema::ExprInfo Sema::analyze_ident(const Node::Ident& ident)
       return ExprInfo(m_scope_arena[m_scope_stack[i]]->m_sym_table.at(ident.name).type, ValCat::LVALUE);
     }
 
-  Utils::panic("Identifier '" + ident.name + "' does not exist");
+  Diagnostic::error(SrcLoc({}, 0, 0, {}), "Could not resolve identifier '{}'", ident.name);
+  return ExprInfo(Type(Type::Base::ERROR), ValCat::RVALUE);
 }
 
 Sema::ExprInfo Sema::analyze_int(const Node::Int& int_)
+{
+  return ExprInfo(Type(Type::Base::I32), ValCat::RVALUE);
+}
+
+Sema::ExprInfo Sema::analyze_bool(const Node::Bool& bool_)
 {
   return ExprInfo(Type(Type::Base::I32), ValCat::RVALUE);
 }
@@ -234,6 +292,8 @@ Sema::ExprInfo Sema::analyze_lit(const std::shared_ptr<Node::Lit>& lit)
 {
   if (auto int_ = std::dynamic_pointer_cast<Node::Int>(lit))
     return analyze_int(*int_);
+  if (auto bool_ = std::dynamic_pointer_cast<Node::Bool>(lit))
+    return analyze_bool(*bool_);
   if (auto double_ = std::dynamic_pointer_cast<Node::Double>(lit))
     return analyze_double(*double_);
   if (auto string = std::dynamic_pointer_cast<Node::String>(lit))
@@ -244,7 +304,11 @@ Sema::ExprInfo Sema::analyze_lit(const std::shared_ptr<Node::Lit>& lit)
     return analyze_path(*path);
   if (auto ident = std::dynamic_pointer_cast<Node::Ident>(lit))
     return analyze_ident(*ident);
-  Utils::panic("Unexpected analyze literal");
+  else
+  {
+    Diagnostic::error(SrcLoc({}, 0, 0, {}), "Unknown literal node");
+    return ExprInfo(Type(Type::Base::ERROR), ValCat::RVALUE);
+  }
 }
 
 void Sema::analyze_decl(const std::shared_ptr<Node::Decl>& decl)

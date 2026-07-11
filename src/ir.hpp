@@ -291,9 +291,10 @@ namespace IR
 
   inline std::ostream& operator<<(std::ostream& os, const Call& call)
   {
-    os << "CALL " << call.args.size() << ", ";
-    for (auto& arg : call.args)
-      os << arg << " ";
+    os << "CALL " << "[ARGS CNT = " << call.args.size() << "]" << ", ARGS = [";
+    for (size_t i = 0; i < call.args.size(); i++)
+      os << call.args[i] << (i == call.args.size() - 1 ? "" : ", ");
+    os << "]";
     os << ", RET IN = " << call.dest;
 
     return os;
@@ -406,8 +407,11 @@ namespace IR
   {
     Operand dest;
     std::vector<Operand> dims;
+    size_t base_t_size;
 
-    explicit Alloca(Operand dest, std::vector<Operand> dims) : dest(std::move(dest)), dims(std::move(dims)) {}
+    explicit Alloca(Operand dest, std::vector<Operand> dims, size_t base_t_size)
+      : dest(std::move(dest)), dims(std::move(dims)), base_t_size(base_t_size) {}
+
     inline friend std::ostream& operator<<(std::ostream& os, const Alloca& alloc)
     {
       os << "[ALLOCA] ";
@@ -496,6 +500,7 @@ class IRGen
     void visit(const Node::Ident&) override;
     void visit(const Node::Path&) override;
     void visit(const Node::Int&) override;
+    void visit(const Node::Bool&) override;
     void visit(const Node::Double&) override;
     void visit(const Node::String&) override;
     void visit(const Node::Char&) override;
@@ -510,6 +515,7 @@ class IRGen
     void visit(const Node::Break&) override;
     void visit(const Node::Ret&) override;
     void visit(const Node::ExprStmt&) override;
+    void visit(const Node::Scope&) override;
   };
 
 public:
@@ -527,6 +533,7 @@ private:
   void gen_ident(const Node::Ident&);
   void gen_path(const Node::Path&);
   void gen_int(const Node::Int&);
+  void gen_bool(const Node::Bool&);
   void gen_double(const Node::Double&);
   void gen_string(const Node::String&);
   void gen_char(const Node::Char&);

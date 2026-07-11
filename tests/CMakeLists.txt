@@ -1,17 +1,15 @@
 find_package(Python3 REQUIRED)
 set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 
-set(
-  PARSER_SOURCES
-  ${SRC_DIR}/tokenizer.cpp
-  ${SRC_DIR}/parser.cpp
-  ${SRC_DIR}/sema.cpp
-)
-
 add_executable(
   parser_tests
   test_main.cpp
-  ${PARSER_SOURCES}
+)
+
+target_link_libraries(
+  parser_tests
+  PCore
+  fmt::fmt
 )
 
 target_include_directories(parser_tests PRIVATE ${SRC_DIR})
@@ -42,6 +40,7 @@ endfunction()
 add_e2e_test(simple "simple.p" "2")
 add_e2e_test(nested "nested.p" "1")
 add_e2e_test(call "call.p" "13\n10\n136")
+add_e2e_test(call_dynamic "call_dynamic.p" "8\n4\n2")
 add_e2e_test(shadow "shadow.p" "10\n5")
 add_e2e_test(cf "cf.p" "12\n3628800")
 add_e2e_test(expr "expr.p" "-289\n17\n3\n5\n4\n5")

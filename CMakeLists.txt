@@ -14,14 +14,22 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_BUILD_TYPE Debug)
+include(FetchContent)
+
+FetchContent_Declare(
+  fmt
+  GIT_REPOSITORY https://github.com/fmtlib/fmt
+  GIT_TAG 10.2.1
+)
+
+FetchContent_MakeAvailable(fmt)
 
 if (ENABLE_BENCHMARKS)
-  include(FetchContent)
 
   FetchContent_Declare(
     benchmark
-    GIT_REPOSITORY  https://github.com/google/benchmark.git
-    GIT_TAG         v1.9.1
+    GIT_REPOSITORY https://github.com/google/benchmark.git
+    GIT_TAG v1.9.1
     SYSTEM
   )
 
@@ -44,6 +52,7 @@ file(GLOB SOURCES
 # add_executable(P ${SOURCES})
 
 add_library(PCore STATIC ${SOURCES})
+target_link_libraries(PCore PUBLIC fmt::fmt)
 
 add_executable(P src/main.cpp)
 target_link_libraries(P PRIVATE PCore)

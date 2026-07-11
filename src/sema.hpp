@@ -122,6 +122,7 @@ public:
   ExprInfo analyze_ident(const Node::Ident&);
   ExprInfo analyze_path(const Node::Path&);
   ExprInfo analyze_int(const Node::Int&);
+  ExprInfo analyze_bool(const Node::Bool&);
   ExprInfo analyze_double(const Node::Double&);
   ExprInfo analyze_string(const Node::String&);
   ExprInfo analyze_char(const Node::Char&);
